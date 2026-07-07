@@ -663,6 +663,7 @@ function renderHistory() {
       const revenue = rowRevenue(row);
       const profit = revenue - row.adSpend;
       const tgGrowth = telegramGrowth(row, chronological);
+      const igGrowth = instagramGrowth(row, chronological);
       return `
         <tr>
           <td>${formatDate(row.date)}</td>
@@ -670,10 +671,10 @@ function renderHistory() {
           <td>${money(row.adSpend)}</td>
           <td class="${profit >= 0 ? "positive" : "negative"}">${money(profit)}</td>
           <td>${number(row.reels)}</td>
+          <td>${number(row.igViews)}</td>
+          <td class="${igGrowth >= 0 ? "positive" : "negative"}">${igGrowth >= 0 ? "+" : ""}${number(igGrowth)}</td>
           <td>${number(row.tiktoks)}</td>
-      <td>${number(row.igViews)}</td>
-      <td>${number(row.ttViews)}</td>
-          <td>${number(row.telegram)}</td>
+          <td>${number(row.ttViews)}</td>
           <td class="${tgGrowth >= 0 ? "positive" : "negative"}">${tgGrowth >= 0 ? "+" : ""}${number(tgGrowth)}</td>
           <td>${number(rowSales(row))}</td>
         </tr>
