@@ -1,4 +1,16 @@
-  return body;
+    throw new Error("Wrong sync secret.");
+  }
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function graphRequest(path, params = {}) {
@@ -9,41 +21,43 @@ async function graphRequest(path, params = {}) {
   url.searchParams.set("access_token", process.env.META_ACCESS_TOKEN);
 
   const response = await fetchWithTimeout(url);
-  return readJsonResponse(response, "Instagram request failed.");
+  const body = await response.json();
+
+  if (!response.ok) {
+    throw new Error(body?.error?.message || "Instagram request failed.");
+  }
+
+  return body;
 }
 
-async function supabaseRequest(path, options = {}) {
-  const url = `${process.env.SUPABASE_URL}/rest/v1/${path}`;
-  const response = await fetchWithTimeout(url, {
-    ...options,
-    headers: {
-      apikey: process.env.SUPABASE_KEY,
-      Authorization: `Bearer ${process.env.SUPABASE_KEY}`,
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
+function localDay(timestamp) {
+  const date = new Date(timestamp);
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Yekaterinburg",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
   });
-
-  return readJsonResponse(response, "Supabase request failed.");
+  return formatter.format(date);
 }
 
 async function getInstagramProfile() {
-  return graphRequest(process.env.INSTAGRAM_ACCOUNT_ID, {
+  return graphRequest(instagramAccountId, {
     fields: "username,followers_count,media_count",
   });
 }
 
 async function getRecentMedia() {
-  const result = await graphRequest(`${process.env.INSTAGRAM_ACCOUNT_ID}/media`, {
-    fields: "id,media_type,media_product_type,timestamp,permalink",
-    limit: 100,
+  const result = await graphRequest(`${instagramAccountId}/media`, {
+    fields: "id,media_product_type,timestamp,permalink",
+    limit: "100",
   });
 
-  return Array.isArray(result?.data) ? result.data : [];
+  return Array.isArray(result.data) ? result.data : [];
 }
 
 async function getDailyAccountViews(date) {
-  const result = await graphRequest(`${process.env.INSTAGRAM_ACCOUNT_ID}/insights`, {
+  const result = await graphRequest(`${instagramAccountId}/insights`, {
     metric: "views",
     period: "day",
     metric_type: "total_value",
@@ -51,20 +65,39 @@ async function getDailyAccountViews(date) {
     until: nextDate(date),
   });
 
-  const row = (result?.data || []).find((item) => item.name === "views");
+  const row = (result.data || []).find((item) => item.name === "views");
   return Number(row?.total_value?.value || 0);
 }
 
 async function selectExistingDailyEntry(date) {
-  const rows = await supabaseRequest(`daily_entries?date=eq.${date}&select=*`);
-  return Array.isArray(rows) ? rows[0] || null : null;
+  const url = `${process.env.SUPABASE_URL}/rest/v1/daily_entries?date=eq.${date}&select=*`;
+  const response = await fetchWithTimeout(url, {
+    headers: {
+      apikey: process.env.SUPABASE_KEY,
+      Authorization: `Bearer ${process.env.SUPABASE_KEY}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  const text = await response.text();
+
+  if (!response.ok) {
+    throw new Error(text || "Supabase select failed.");
+  }
+
+  const rows = text ? JSON.parse(text) : [];
+  return rows[0] || null;
 }
 
 async function upsertDailyEntry(date, instagram) {
   const existing = await selectExistingDailyEntry(date);
-  const saved = await supabaseRequest("daily_entries?on_conflict=date", {
+  const url = `${process.env.SUPABASE_URL}/rest/v1/daily_entries?on_conflict=date`;
+  const response = await fetchWithTimeout(url, {
     method: "POST",
     headers: {
+      apikey: process.env.SUPABASE_KEY,
+      Authorization: `Bearer ${process.env.SUPABASE_KEY}`,
+      "Content-Type": "application/json",
       Prefer: "resolution=merge-duplicates,return=representation",
     },
     body: JSON.stringify({
@@ -87,20 +120,20 @@ async function upsertDailyEntry(date, instagram) {
     }),
   });
 
-  return saved;
+  const text = await response.text();
+
+  if (!response.ok) {
+    throw new Error(text || "Supabase upsert failed.");
+  }
+
+  return text ? JSON.parse(text) : null;
 }
 
 async function getInstagramStats(date) {
-  const [profile, media, dailyViews] = await Promise.all([
-    getInstagramProfile(),
-    getRecentMedia(),
-    getDailyAccountViews(date),
-  ]);
-
-  const reels = media.filter((item) => (
-    item.media_product_type === "REELS" &&
-    localDate(new Date(item.timestamp)) === date
-  ));
+  const profile = await getInstagramProfile();
+  const media = await getRecentMedia();
+  const views = await getDailyAccountViews(date);
+  const reels = media.filter((item) => item.media_product_type === "REELS" && localDay(item.timestamp) === date);
 
   return {
     date,
@@ -108,7 +141,7 @@ async function getInstagramStats(date) {
     followers: Number(profile.followers_count || 0),
     mediaCount: Number(profile.media_count || 0),
     reels: reels.length,
-    views: dailyViews,
+    views,
     viewsSource: "account_daily_total",
     media: reels.map((item) => ({
       id: item.id,
@@ -134,14 +167,15 @@ export default async function handler(req, res) {
     return sendJson(res, 200, {
       ok: true,
       date,
-      instagramAccountId: process.env.INSTAGRAM_ACCOUNT_ID,
+      instagramAccountId,
       instagram,
       saved,
     });
   } catch (error) {
-    return sendJson(res, error.name === "AbortError" ? 504 : 500, {
+    const isAbort = error.name === "AbortError";
+    return sendJson(res, isAbort ? 504 : 500, {
       ok: false,
-      error: error.name === "AbortError" ? "Sync request timed out." : error.message,
+      error: isAbort ? "Sync request timed out." : error.message,
       source: "sync-instagram",
     });
   }
