@@ -423,6 +423,7 @@ h1 {
 }
 
 .chart-scroll {
+  position: relative;
   width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
@@ -489,8 +490,30 @@ h1 {
   filter: drop-shadow(0 0 8px rgba(192, 132, 252, 0.45));
 }
 
-.chart-legend,
-.chart-values {
+.chart-tooltip {
+  position: absolute;
+  z-index: 2;
+  min-width: max-content;
+  max-width: 220px;
+  padding: 7px 9px;
+  border: 1px solid rgba(192, 132, 252, 0.7);
+  border-radius: 6px;
+  background: rgba(17, 17, 27, 0.96);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.32);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 800;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 12px);
+  transition: opacity 0.16s ease;
+}
+
+.chart-tooltip.active {
+  opacity: 1;
+}
+
+.chart-legend {
   display: flex;
   gap: 8px;
   overflow-x: auto;
@@ -514,20 +537,6 @@ h1 {
   width: 9px;
   height: 9px;
   border-radius: 999px;
-}
-
-.chart-values {
-  margin-top: 8px;
-  color: var(--muted);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.chart-values span {
-  padding: 6px 8px;
-  border: 1px solid rgba(139, 92, 246, 0.2);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.03);
 }
 
 .wide-chart {

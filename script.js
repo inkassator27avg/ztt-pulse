@@ -357,11 +357,41 @@ function chartPoint(index, length, plotWidth, padLeft) {
   return padLeft + (plotWidth / (length - 1)) * index;
 }
 
+function placeChartTooltip(chart, x, y, text) {
+  const tooltip = chart.querySelector(".chart-tooltip");
+  if (!tooltip) return;
+
+  tooltip.textContent = text;
+  tooltip.style.left = `${x}px`;
+  tooltip.style.top = `${y}px`;
+  tooltip.classList.add("active");
+}
+
+function bindChartTooltip(chart, points) {
+  const svg = chart.querySelector(".chart-svg");
+  if (!svg || !points.length) return;
+
+  svg.addEventListener("click", (event) => {
+    const rect = svg.getBoundingClientRect();
+    const scaleX = Number(svg.getAttribute("width")) / rect.width;
+    const scaleY = Number(svg.getAttribute("height")) / rect.height;
+    const clickX = (event.clientX - rect.left) * scaleX;
+    const clickY = (event.clientY - rect.top) * scaleY;
+    const closest = points.reduce((best, point) => {
+      const distance = Math.hypot(point.x - clickX, point.y - clickY);
+      return !best || distance < best.distance ? { ...point, distance } : best;
+    }, null);
+
+    if (!closest) return;
+    placeChartTooltip(chart, closest.x, closest.y, closest.text);
+  });
+}
+
 function renderDataChart(chartId, series, labels, options = {}) {
   const chart = document.querySelector(chartId);
   if (!chart) return;
 
-  const width = Math.max(520, labels.length * 82);
+  const width = Math.max(560, labels.length * 78);
   const height = 230;
   const padLeft = 58;
   const padRight = 24;
@@ -388,14 +418,14 @@ function renderDataChart(chartId, series, labels, options = {}) {
     })
     .join("");
 
-  const labelIndexes = labels.length <= 5 ? labels.map((_, index) => index) : [0, Math.floor(labels.length / 2), labels.length - 1];
-  const xLabels = labelIndexes
-    .map((index) => {
+  const xLabels = labels
+    .map((label, index) => {
       const x = chartPoint(index, labels.length, plotWidth, padLeft);
-      return `<text class="chart-x-label" x="${x}" y="${height - 14}">${labels[index]?.slice(5) || ""}</text>`;
+      return `<text class="chart-x-label" x="${x}" y="${height - 14}">${label?.slice(5) || ""}</text>`;
     })
     .join("");
 
+  const interactivePoints = [];
   const shapes = series
     .map((item, seriesIndex) => {
       const values = item.values;
@@ -415,8 +445,13 @@ function renderDataChart(chartId, series, labels, options = {}) {
             const top = y(value);
             const barHeight = Math.max(padTop + plotHeight - top, Number(value || 0) > 0 ? 3 : 0);
             const tooltip = `${labels[index]} · ${label}: ${formatChartValue(value, format)}`;
+            interactivePoints.push({
+              x: x + barWidth / 2,
+              y: top,
+              text: tooltip,
+            });
             return `
-              <rect class="chart-bar" x="${x}" y="${top}" width="${barWidth}" height="${barHeight}" fill="${color}" tabindex="0">
+              <rect class="chart-bar" x="${x}" y="${top}" width="${barWidth}" height="${barHeight}" fill="${color}" tabindex="0" data-tooltip="${tooltip}">
                 <title>${tooltip}</title>
               </rect>
             `;
@@ -432,8 +467,9 @@ function renderDataChart(chartId, series, labels, options = {}) {
           const x = chartPoint(index, labels.length, plotWidth, padLeft);
           const pointY = y(value);
           const tooltip = `${labels[index]} · ${label}: ${formatChartValue(value, format)}`;
+          interactivePoints.push({ x, y: pointY, text: tooltip });
           return `
-            <circle class="chart-dot" cx="${x}" cy="${pointY}" r="5" fill="${color}" tabindex="0">
+            <circle class="chart-dot" cx="${x}" cy="${pointY}" r="5" fill="${color}" tabindex="0" data-tooltip="${tooltip}">
               <title>${tooltip}</title>
             </circle>
           `;
@@ -451,15 +487,6 @@ function renderDataChart(chartId, series, labels, options = {}) {
     .map((item) => `<span><i style="background:${item.color}"></i>${item.label || "Value"}</span>`)
     .join("");
 
-  const dataRows = labels
-    .map((label, index) => {
-      const values = series
-        .map((item) => `${item.label || "Value"} ${formatChartValue(item.values[index] || 0, item.format || options.format)}`)
-        .join(" · ");
-      return `<span>${label.slice(5)}: ${values}</span>`;
-    })
-    .join("");
-
   chart.innerHTML = `
     <div class="chart-scroll" tabindex="0" aria-label="Scroll chart horizontally">
       <svg class="chart-svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img">
@@ -467,10 +494,19 @@ function renderDataChart(chartId, series, labels, options = {}) {
         ${shapes}
         ${xLabels}
       </svg>
+      <div class="chart-tooltip" aria-live="polite"></div>
     </div>
     <div class="chart-legend">${legend}</div>
-    <div class="chart-values" aria-label="Chart values">${dataRows}</div>
   `;
+
+  chart.querySelectorAll("[data-tooltip]").forEach((element) => {
+    element.addEventListener("click", (event) => {
+      event.stopPropagation();
+      placeChartTooltip(chart, Number(element.getAttribute("cx") || Number(element.getAttribute("x")) + Number(element.getAttribute("width") || 0) / 2), Number(element.getAttribute("cy") || element.getAttribute("y")), element.dataset.tooltip);
+    });
+  });
+
+  bindChartTooltip(chart, interactivePoints);
 }
 
 function renderCharts() {
