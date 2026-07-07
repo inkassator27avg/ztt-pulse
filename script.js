@@ -49,6 +49,9 @@ function toDbRow(row) {
     ad_spend: Number(row.adSpend || 0),
     leads: Number(row.leads || 0),
     telegram: Number(row.telegram || 0),
+    telegram_joined: Number(row.telegramJoined || 0),
+    telegram_left: Number(row.telegramLeft || 0),
+    telegram_growth: Number(row.telegramGrowth || 0),
     instagram: Number(row.instagram || 0),
     tiktok_followers: Number(row.tiktokFollowers || 0),
     reels: Number(row.reels || 0),
@@ -70,6 +73,9 @@ function fromDbRow(row) {
     adSpend: Number(row.ad_spend || 0),
     leads: Number(row.leads || 0),
     telegram: Number(row.telegram || 0),
+    telegramJoined: Number(row.telegram_joined || 0),
+    telegramLeft: Number(row.telegram_left || 0),
+    telegramGrowth: Number(row.telegram_growth || 0),
     instagram: Number(row.instagram || 0),
     tiktokFollowers: Number(row.tiktok_followers || 0),
     reels: Number(row.reels || 0),
@@ -142,6 +148,9 @@ function normalizeEntries(rows) {
       adSpend: 0,
       leads: 0,
       telegram: 0,
+      telegramJoined: 0,
+      telegramLeft: 0,
+      telegramGrowth: 0,
       instagram: 0,
       tiktokFollowers: row.tiktokFollowers ?? 0,
       reels: 0,
@@ -252,6 +261,7 @@ function previousFor(row, sorted) {
 }
 
 function telegramGrowth(row, sorted) {
+  if (Number(row.telegramGrowth || 0)) return Number(row.telegramGrowth || 0);
   const previous = previousFor(row, sorted);
   return previous ? Number(row.telegram || 0) - Number(previous.telegram || 0) : 0;
 }

@@ -8,6 +8,10 @@
     {
       "path": "/api/sync-instagram",
       "schedule": "10 3 * * *"
+    },
+    {
+      "path": "/api/sync-telegram",
+      "schedule": "20 3 * * *"
     }
   ],
   "headers": [
