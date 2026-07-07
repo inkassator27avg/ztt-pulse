@@ -3,11 +3,9 @@ const adAccountId = "act_1038880678191397";
 
 const requiredEnv = ["META_ACCESS_TOKEN", "SUPABASE_URL", "SUPABASE_KEY"];
 
-function json(response, status = 200) {
-  return new Response(JSON.stringify(response, null, 2), {
-    status,
-    headers: { "content-type": "application/json; charset=utf-8" },
-  });
+function sendJson(res, status, response) {
+  res.status(status).setHeader("content-type", "application/json; charset=utf-8");
+  res.end(JSON.stringify(response, null, 2));
 }
 
 function isoDate(date) {
@@ -20,9 +18,8 @@ function yesterday() {
   return isoDate(date);
 }
 
-function getDate(requestUrl) {
-  const url = new URL(requestUrl);
-  const value = url.searchParams.get("date");
+function getDate(req) {
+  const value = Array.isArray(req.query?.date) ? req.query.date[0] : req.query?.date;
   if (!value) return yesterday();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     throw new Error("Date must be YYYY-MM-DD.");
@@ -37,15 +34,26 @@ function checkEnv() {
   }
 }
 
-function checkSecret(request) {
+function checkSecret(req) {
   if (!process.env.SYNC_SECRET) return;
+  if (req.headers["x-vercel-cron"]) return;
 
-  const url = new URL(request.url);
-  const querySecret = url.searchParams.get("secret");
-  const headerSecret = request.headers.get("x-sync-secret");
+  const querySecret = Array.isArray(req.query?.secret) ? req.query.secret[0] : req.query?.secret;
+  const headerSecret = req.headers["x-sync-secret"];
 
   if (querySecret !== process.env.SYNC_SECRET && headerSecret !== process.env.SYNC_SECRET) {
     throw new Error("Wrong sync secret.");
+  }
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -55,7 +63,7 @@ async function getMetaInsights(date) {
   url.searchParams.set("time_range", JSON.stringify({ since: date, until: date }));
   url.searchParams.set("access_token", process.env.META_ACCESS_TOKEN);
 
-  const response = await fetch(url);
+  const response = await fetchWithTimeout(url);
   const body = await response.json();
 
   if (!response.ok) {
@@ -73,7 +81,7 @@ async function getMetaInsights(date) {
 
 async function upsertDailyEntry(insights) {
   const url = `${process.env.SUPABASE_URL}/rest/v1/daily_entries?on_conflict=date`;
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: "POST",
     headers: {
       apikey: process.env.SUPABASE_KEY,
@@ -96,16 +104,20 @@ async function upsertDailyEntry(insights) {
   return text ? JSON.parse(text) : null;
 }
 
-export default async function handler(request) {
+export default async function handler(req, res) {
   try {
-    checkEnv();
-    checkSecret(request);
+    if (req.method !== "GET" && req.method !== "POST") {
+      return sendJson(res, 405, { ok: false, error: "Method not allowed." });
+    }
 
-    const date = getDate(request.url);
+    checkEnv();
+    checkSecret(req);
+
+    const date = getDate(req);
     const insights = await getMetaInsights(date);
     const saved = await upsertDailyEntry(insights);
 
-    return json({
+    return sendJson(res, 200, {
       ok: true,
       date,
       adAccountId,
@@ -113,6 +125,10 @@ export default async function handler(request) {
       saved,
     });
   } catch (error) {
-    return json({ ok: false, error: error.message }, 500);
+    const isAbort = error.name === "AbortError";
+    return sendJson(res, isAbort ? 504 : 500, {
+      ok: false,
+      error: isAbort ? "Sync request timed out." : error.message,
+    });
   }
 }
