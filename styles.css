@@ -21,6 +21,7 @@
 body {
   margin: 0;
   min-width: 320px;
+  overflow-x: hidden;
   background: var(--bg);
   color: var(--text);
   font-family:
@@ -377,16 +378,6 @@ h1 {
   font-weight: 700;
 }
 
-canvas {
-  width: 100%;
-  height: 280px;
-  margin-top: 16px;
-}
-
-.lower canvas {
-  height: 240px;
-}
-
 .chart-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -395,8 +386,9 @@ canvas {
 }
 
 .mini-chart {
-  min-height: 326px;
+  min-height: 372px;
   padding: 14px;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: #0b0b13;
@@ -426,9 +418,116 @@ canvas {
   font-size: 13px;
 }
 
-.tg-style canvas {
-  height: 210px;
+.data-chart {
   margin-top: 10px;
+}
+
+.chart-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 5px;
+  scrollbar-color: rgba(192, 132, 252, 0.65) rgba(255, 255, 255, 0.05);
+  scrollbar-width: thin;
+}
+
+.chart-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
+.chart-scroll::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.chart-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(192, 132, 252, 0.65);
+}
+
+.chart-svg {
+  display: block;
+  min-width: 520px;
+}
+
+.chart-axis line {
+  stroke: #252539;
+  stroke-width: 1;
+}
+
+.chart-axis text,
+.chart-x-label {
+  fill: #91a0ad;
+  font-size: 12px;
+}
+
+.chart-x-label {
+  text-anchor: middle;
+}
+
+.chart-line {
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.chart-dot,
+.chart-bar {
+  cursor: pointer;
+  outline: none;
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+.chart-dot:hover,
+.chart-dot:focus-visible,
+.chart-bar:hover,
+.chart-bar:focus-visible {
+  opacity: 0.82;
+  filter: drop-shadow(0 0 8px rgba(192, 132, 252, 0.45));
+}
+
+.chart-legend,
+.chart-values {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.chart-legend {
+  flex-wrap: wrap;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chart-legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+}
+
+.chart-values {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.chart-values span {
+  padding: 6px 8px;
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .wide-chart {
@@ -688,21 +787,47 @@ td {
     position: static;
     height: auto;
     gap: 20px;
+    padding: 18px 16px 12px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
   }
 
   .nav {
-    grid-template-columns: repeat(3, 1fr);
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
     margin: 8px 0 0;
   }
 
-  .topbar {
-    align-items: flex-start;
-    flex-direction: column;
+  .nav a {
+    flex: 0 0 auto;
+    min-width: 104px;
+    text-align: center;
   }
 
-  .range-tabs,
-  .range-tabs button {
+  .topbar {
+    position: sticky;
+    top: 0;
+    align-items: flex-start;
+    flex-direction: column;
+    margin: 0 -16px;
+    padding: 12px 16px;
+  }
+
+  .range-tabs {
     width: 100%;
+    overflow-x: auto;
+    justify-content: flex-start;
+    scrollbar-width: none;
+  }
+
+  .range-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .range-tabs button {
+    flex: 0 0 auto;
+    min-width: max-content;
   }
 
   .kpi-grid {
@@ -716,6 +841,10 @@ td {
   .entry-form {
     grid-template-columns: 1fr;
   }
+
+  .mini-chart {
+    min-height: 360px;
+  }
 }
 
 @media (max-width: 560px) {
@@ -725,12 +854,33 @@ td {
   }
 
   .topbar h2 {
-    font-size: 23px;
+    font-size: 22px;
   }
 
   .kpi-grid,
   .day-compare,
   .entry-form {
     grid-template-columns: 1fr;
+  }
+
+  .panel,
+  .chart-panel,
+  .history-panel,
+  .entry-panel {
+    padding: 14px;
+  }
+
+  .chart-title {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .chart-title strong {
+    font-size: 20px;
+  }
+
+  .data-chart {
+    margin-right: -4px;
   }
 }

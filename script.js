@@ -347,81 +347,130 @@ function renderCompare() {
   signal.textContent = periodLabel();
 }
 
-function drawTelegramChart(canvasId, series, labels, options = {}) {
-  const canvas = document.querySelector(canvasId);
-  const ctx = canvas.getContext("2d");
-  const width = canvas.width;
-  const height = canvas.height;
-  const padLeft = 42;
-  const padRight = 12;
-  const padTop = 14;
-  const padBottom = 26;
+function formatChartValue(value, type = "number") {
+  if (type === "money") return money(value);
+  return number(value);
+}
+
+function chartPoint(index, length, plotWidth, padLeft) {
+  if (length <= 1) return padLeft + plotWidth / 2;
+  return padLeft + (plotWidth / (length - 1)) * index;
+}
+
+function renderDataChart(chartId, series, labels, options = {}) {
+  const chart = document.querySelector(chartId);
+  if (!chart) return;
+
+  const width = Math.max(520, labels.length * 82);
+  const height = 230;
+  const padLeft = 58;
+  const padRight = 24;
+  const padTop = 22;
+  const padBottom = 46;
   const plotWidth = width - padLeft - padRight;
   const plotHeight = height - padTop - padBottom;
   const allValues = series.flatMap((item) => item.values.map((value) => Number(value || 0)));
-  const rawMax = Math.max(...allValues, 1);
-  const rawMin = options.minZero === false ? Math.min(...allValues, 0) : 0;
-  const max = rawMax === rawMin ? rawMax + 1 : rawMax;
+  const min = 0;
+  const maxValue = Math.max(...allValues, 1);
+  const max = maxValue === min ? maxValue + 1 : maxValue;
+  const y = (value) => padTop + plotHeight - ((Number(value || 0) - min) / (max - min)) * plotHeight;
+  const axisValues = Array.from({ length: 5 }, (_, index) => max - (max / 4) * index);
 
-  ctx.clearRect(0, 0, width, height);
-  ctx.strokeStyle = "#252539";
-  ctx.lineWidth = 1;
-  ctx.font = "11px Inter, sans-serif";
+  const grid = axisValues
+    .map((value, index) => {
+      const lineY = padTop + (plotHeight / 4) * index;
+      return `
+        <g class="chart-axis">
+          <line x1="${padLeft}" y1="${lineY}" x2="${width - padRight}" y2="${lineY}"></line>
+          <text x="8" y="${lineY + 4}">${formatChartValue(value, options.format)}</text>
+        </g>
+      `;
+    })
+    .join("");
 
-  for (let i = 0; i < 5; i += 1) {
-    const y = padTop + (plotHeight / 4) * i;
-    const value = max - ((max - rawMin) / 4) * i;
+  const labelIndexes = labels.length <= 5 ? labels.map((_, index) => index) : [0, Math.floor(labels.length / 2), labels.length - 1];
+  const xLabels = labelIndexes
+    .map((index) => {
+      const x = chartPoint(index, labels.length, plotWidth, padLeft);
+      return `<text class="chart-x-label" x="${x}" y="${height - 14}">${labels[index]?.slice(5) || ""}</text>`;
+    })
+    .join("");
 
-    ctx.beginPath();
-    ctx.moveTo(padLeft, y);
-    ctx.lineTo(width - padRight, y);
-    ctx.stroke();
+  const shapes = series
+    .map((item, seriesIndex) => {
+      const values = item.values;
+      const label = item.label || "Value";
+      const color = item.color;
+      const format = item.format || options.format;
 
-    ctx.fillStyle = "#91a0ad";
-    ctx.fillText(number(value), 4, y + 4);
-  }
+      if (item.type === "bar") {
+        const barGroupCount = series.filter((entry) => entry.type === "bar").length || 1;
+        const step = plotWidth / Math.max(labels.length, 1);
+        const barWidth = Math.max(Math.min(step / (barGroupCount + 1), 22), 8);
+        const barOffset = (seriesIndex - (barGroupCount - 1) / 2) * (barWidth + 4);
 
-  series.forEach((item) => {
-    const values = item.values;
-    const color = item.color;
+        return values
+          .map((value, index) => {
+            const x = padLeft + step * index + step / 2 - barWidth / 2 + barOffset;
+            const top = y(value);
+            const barHeight = Math.max(padTop + plotHeight - top, Number(value || 0) > 0 ? 3 : 0);
+            const tooltip = `${labels[index]} · ${label}: ${formatChartValue(value, format)}`;
+            return `
+              <rect class="chart-bar" x="${x}" y="${top}" width="${barWidth}" height="${barHeight}" fill="${color}" tabindex="0">
+                <title>${tooltip}</title>
+              </rect>
+            `;
+          })
+          .join("");
+      }
 
-    if (item.type === "bar") {
-      const step = plotWidth / Math.max(values.length, 1);
-      const barWidth = Math.max(step * 0.36, 5);
-      const offset = item.offset || 0;
-      ctx.fillStyle = color;
-      values.forEach((value, index) => {
-        const x = padLeft + step * index + step * 0.5 + offset;
-        const barHeight = ((Number(value || 0) - rawMin) / (max - rawMin)) * plotHeight;
-        const y = padTop + plotHeight - barHeight;
-        ctx.fillRect(x - barWidth / 2, y, barWidth, barHeight);
-      });
-      return;
-    }
+      const points = values
+        .map((value, index) => `${chartPoint(index, labels.length, plotWidth, padLeft)},${y(value)}`)
+        .join(" ");
+      const circles = values
+        .map((value, index) => {
+          const x = chartPoint(index, labels.length, plotWidth, padLeft);
+          const pointY = y(value);
+          const tooltip = `${labels[index]} · ${label}: ${formatChartValue(value, format)}`;
+          return `
+            <circle class="chart-dot" cx="${x}" cy="${pointY}" r="5" fill="${color}" tabindex="0">
+              <title>${tooltip}</title>
+            </circle>
+          `;
+        })
+        .join("");
 
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    values.forEach((value, index) => {
-      const x = padLeft + (plotWidth / Math.max(values.length - 1, 1)) * index;
-      const y = padTop + plotHeight - ((Number(value || 0) - rawMin) / (max - rawMin)) * plotHeight;
-      if (index === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-  });
+      return `
+        <polyline class="chart-line" points="${points}" stroke="${color}"></polyline>
+        ${circles}
+      `;
+    })
+    .join("");
 
-  ctx.fillStyle = "#9b98ae";
-  const labelIndexes = labels.length <= 4 ? labels.map((_, index) => index) : [0, Math.floor(labels.length / 2), labels.length - 1];
-  labelIndexes.forEach((index) => {
-    const x = padLeft + (plotWidth / Math.max(labels.length - 1, 1)) * index;
-    ctx.fillText(labels[index]?.slice(5) || "", x - 16, height - 7);
-  });
-}
+  const legend = series
+    .map((item) => `<span><i style="background:${item.color}"></i>${item.label || "Value"}</span>`)
+    .join("");
 
-function normalizedSeries(values) {
-  const max = Math.max(...values, 1);
-  return values.map((value) => (value / max) * 100);
+  const dataRows = labels
+    .map((label, index) => {
+      const values = series
+        .map((item) => `${item.label || "Value"} ${formatChartValue(item.values[index] || 0, item.format || options.format)}`)
+        .join(" · ");
+      return `<span>${label.slice(5)}: ${values}</span>`;
+    })
+    .join("");
+
+  chart.innerHTML = `
+    <div class="chart-scroll" tabindex="0" aria-label="Scroll chart horizontally">
+      <svg class="chart-svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img">
+        ${grid}
+        ${shapes}
+        ${xLabels}
+      </svg>
+    </div>
+    <div class="chart-legend">${legend}</div>
+    <div class="chart-values" aria-label="Chart values">${dataRows}</div>
+  `;
 }
 
 function renderCharts() {
@@ -445,19 +494,19 @@ function renderCharts() {
   });
 
   const contentSeries = [
-    { color: "#fb7185", values: reels, type: "bar", offset: -4 },
-    { color: "#38bdf8", values: tiktoks, type: "bar", offset: 4 },
+    { label: "Reels", color: "#fb7185", values: reels, type: "bar" },
+    { label: "TikTok", color: "#38bdf8", values: tiktoks, type: "bar" },
   ];
-  const igViewsSeries = [{ color: "#2f89ff", values: igViews }];
-  const ttViewsSeries = [{ color: "#38bdf8", values: ttViews }];
-  const tgSeries = [{ color: "#5ee15a", values: growth, type: "bar" }];
-  const salesRevenueSeries = [{ color: "#c084fc", values: salesRevenue }];
+  const igViewsSeries = [{ label: "Instagram", color: "#2f89ff", values: igViews }];
+  const ttViewsSeries = [{ label: "TikTok", color: "#38bdf8", values: ttViews }];
+  const tgSeries = [{ label: "TG +", color: "#5ee15a", values: growth, type: "bar" }];
+  const salesRevenueSeries = [{ label: "Sales", color: "#c084fc", values: salesRevenue, format: "money" }];
 
-  drawTelegramChart("#contentChart", contentSeries, labels);
-  drawTelegramChart("#igViewsChart", igViewsSeries, labels);
-  drawTelegramChart("#ttViewsChart", ttViewsSeries, labels);
-  drawTelegramChart("#tgGrowthChart", tgSeries, labels);
-  drawTelegramChart("#salesRevenueChart", salesRevenueSeries, labels);
+  renderDataChart("#contentChart", contentSeries, labels);
+  renderDataChart("#igViewsChart", igViewsSeries, labels);
+  renderDataChart("#ttViewsChart", ttViewsSeries, labels);
+  renderDataChart("#tgGrowthChart", tgSeries, labels);
+  renderDataChart("#salesRevenueChart", salesRevenueSeries, labels, { format: "money" });
 }
 
 function renderSummary() {
