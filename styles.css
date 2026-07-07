@@ -29,6 +29,61 @@ body {
   letter-spacing: 0;
 }
 
+.lock-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: radial-gradient(circle at top, rgba(139, 92, 246, 0.18), transparent 34%), var(--bg);
+}
+
+.lock-screen.hidden {
+  display: none;
+}
+
+.lock-card {
+  width: min(420px, 100%);
+  padding: 28px;
+  border: 1px solid rgba(139, 92, 246, 0.4);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.lock-card h1 {
+  font-size: 28px;
+}
+
+.lock-card p {
+  margin-top: 10px;
+  color: var(--muted);
+}
+
+.lock-card input {
+  margin-top: 22px;
+}
+
+.lock-card button {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 12px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--purple);
+  color: white;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.lock-card span {
+  display: block;
+  min-height: 18px;
+  margin-top: 10px;
+  color: var(--red);
+  font-size: 13px;
+}
+
 button,
 input {
   font: inherit;

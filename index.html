@@ -7,6 +7,16 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
+    <section class="lock-screen" id="lockScreen">
+      <form class="lock-card" id="lockForm">
+        <h1>ЗТТ Pulse</h1>
+        <p>Введите пароль для доступа к дашборду.</p>
+        <input id="passwordInput" type="password" placeholder="Пароль" autocomplete="current-password" />
+        <button type="submit">Войти</button>
+        <span id="lockError"></span>
+      </form>
+    </section>
+
     <main class="app">
       <aside class="sidebar">
         <div>
