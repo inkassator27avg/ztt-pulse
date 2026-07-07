@@ -37,6 +37,9 @@ const rangeButtons = document.querySelectorAll("[data-range]");
 const resetButton = document.querySelector("#resetData");
 const periodSummary = document.querySelector("#periodSummary");
 const calculatedRevenue = document.querySelector("#calculatedRevenue");
+const customRange = document.querySelector("#customRange");
+const customStart = document.querySelector("#customStart");
+const customEnd = document.querySelector("#customEnd");
 const lockScreen = document.querySelector("#lockScreen");
 const lockForm = document.querySelector("#lockForm");
 const passwordInput = document.querySelector("#passwordInput");
@@ -189,6 +192,15 @@ function number(value) {
   return Math.round(value).toLocaleString("ru-RU");
 }
 
+function formatDate(dateString, mode = "long") {
+  if (!dateString) return "-";
+  const date = new Date(`${dateString}T00:00:00`);
+  const options = mode === "short"
+    ? { day: "numeric", month: "short" }
+    : { day: "numeric", month: "long" };
+  return new Intl.DateTimeFormat("ru-RU", options).format(date).replace(".", "");
+}
+
 function percent(value) {
   if (!Number.isFinite(value)) return "0%";
   return `${Math.round(value * 10) / 10}%`;
@@ -235,6 +247,12 @@ function scopedEntries() {
   const sorted = sortedEntries();
   if (selectedRange === "thisMonth") return sorted.filter((row) => isSameMonth(row.date, 0));
   if (selectedRange === "lastMonth") return sorted.filter((row) => isSameMonth(row.date, -1));
+  if (selectedRange === "custom") {
+    const start = customStart?.value;
+    const end = customEnd?.value;
+    return sorted.filter((row) => (!start || row.date >= start) && (!end || row.date <= end));
+  }
+  if (selectedRange === "all") return sorted;
   return sorted.slice(-Number(selectedRange));
 }
 
@@ -301,6 +319,11 @@ function periodLabel() {
     lastMonth: "прошлый месяц",
     all: "всё время",
   };
+  if (selectedRange === "custom") {
+    const start = customStart?.value ? formatDate(customStart.value) : "начало";
+    const end = customEnd?.value ? formatDate(customEnd.value) : "сегодня";
+    return `${start} — ${end}`;
+  }
   return labels[selectedRange] || "период";
 }
 
@@ -313,7 +336,7 @@ function renderCompare() {
     <article class="day-card focus">
       <span class="eyebrow">Последний отчёт</span>
       <div class="day-title">
-        <h3>${lastReport.date || "-"}</h3>
+        <h3>${formatDate(lastReport.date)}</h3>
         <strong>${money(lastReport.revenue || 0)}</strong>
       </div>
       <div class="metric-strip">
@@ -323,13 +346,12 @@ function renderCompare() {
         <span>TG + <b class="${lastReport.tgGrowth >= 0 ? "positive" : "negative"}">${number(lastReport.tgGrowth)}</b></span>
         <span>Sales <b>${number(lastReport.sales || 0)}</b></span>
       </div>
-      <small>Профит ${money(lastReport.profit || 0)} · реклама ${money(lastReport.adSpend || 0)} · тарифы: ${tariffText(lastReport)}</small>
     </article>
 
     <article class="day-card">
       <span class="eyebrow">День до этого</span>
       <div class="day-title">
-        <h3>${previousReport.date || "-"}</h3>
+        <h3>${formatDate(previousReport.date)}</h3>
         <strong>${money(previousReport.revenue || 0)}</strong>
       </div>
       <div class="metric-strip">
@@ -339,7 +361,6 @@ function renderCompare() {
         <span>TG + <b class="${previousReport.tgGrowth >= 0 ? "positive" : "negative"}">${number(previousReport.tgGrowth)}</b></span>
         <span>Sales <b>${number(previousReport.sales || 0)}</b></span>
       </div>
-      <small>Профит ${money(previousReport.profit || 0)} · реклама ${money(previousReport.adSpend || 0)} · тарифы: ${tariffText(previousReport)}</small>
     </article>
   `;
 
@@ -421,7 +442,7 @@ function renderDataChart(chartId, series, labels, options = {}) {
   const xLabels = labels
     .map((label, index) => {
       const x = chartPoint(index, labels.length, plotWidth, padLeft);
-      return `<text class="chart-x-label" x="${x}" y="${height - 14}">${label?.slice(5) || ""}</text>`;
+      return `<text class="chart-x-label" x="${x}" y="${height - 14}">${formatDate(label, "short")}</text>`;
     })
     .join("");
 
@@ -444,7 +465,7 @@ function renderDataChart(chartId, series, labels, options = {}) {
             const x = padLeft + step * index + step / 2 - barWidth / 2 + barOffset;
             const top = y(value);
             const barHeight = Math.max(padTop + plotHeight - top, Number(value || 0) > 0 ? 3 : 0);
-            const tooltip = `${labels[index]} · ${label}: ${formatChartValue(value, format)}`;
+            const tooltip = `${formatDate(labels[index])} · ${label}: ${formatChartValue(value, format)}`;
             interactivePoints.push({
               x: x + barWidth / 2,
               y: top,
@@ -466,7 +487,7 @@ function renderDataChart(chartId, series, labels, options = {}) {
         .map((value, index) => {
           const x = chartPoint(index, labels.length, plotWidth, padLeft);
           const pointY = y(value);
-          const tooltip = `${labels[index]} · ${label}: ${formatChartValue(value, format)}`;
+          const tooltip = `${formatDate(labels[index])} · ${label}: ${formatChartValue(value, format)}`;
           interactivePoints.push({ x, y: pointY, text: tooltip });
           return `
             <circle class="chart-dot" cx="${x}" cy="${pointY}" r="5" fill="${color}" tabindex="0" data-tooltip="${tooltip}">
@@ -591,7 +612,6 @@ function renderSummary() {
 function renderHistory() {
   const sorted = sortedEntries();
   historyRows.innerHTML = sorted
-    .slice(-7)
     .reverse()
     .map((row) => {
       const revenue = rowRevenue(row);
@@ -599,7 +619,7 @@ function renderHistory() {
       const tgGrowth = telegramGrowth(row, sorted);
       return `
         <tr>
-          <td>${row.date}</td>
+          <td>${formatDate(row.date)}</td>
           <td>${money(revenue)}</td>
           <td>${money(row.adSpend)}</td>
           <td class="${profit >= 0 ? "positive" : "negative"}">${money(profit)}</td>
@@ -646,8 +666,13 @@ rangeButtons.forEach((button) => {
     rangeButtons.forEach((item) => item.classList.remove("active"));
     button.classList.add("active");
     selectedRange = button.dataset.range;
+    customRange?.classList.toggle("hidden", selectedRange !== "custom");
     render();
   });
+});
+
+[customStart, customEnd].forEach((input) => {
+  input?.addEventListener("change", render);
 });
 
 form.addEventListener("input", updateCalculatedRevenue);
@@ -686,7 +711,7 @@ form.addEventListener("submit", async (event) => {
   render();
 });
 
-resetButton.addEventListener("click", () => {
+resetButton?.addEventListener("click", () => {
   entries = normalizeEntries(demoEntries);
   saveEntries();
   fillFormDefaults();

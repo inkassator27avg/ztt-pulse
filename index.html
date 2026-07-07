@@ -3,13 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ЗТТ Pulse</title>
+    <title>ЗТТ</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="./assets/favicon-32.png" />
+    <link rel="apple-touch-icon" href="./assets/favicon-180.png" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <section class="lock-screen" id="lockScreen">
       <form class="lock-card" id="lockForm">
-        <h1>ЗТТ Pulse</h1>
+        <h1>ЗТТ</h1>
         <p>Введите пароль для доступа к дашборду.</p>
         <input id="passwordInput" type="password" placeholder="Пароль" autocomplete="current-password" />
         <button type="submit">Войти</button>
@@ -20,31 +22,32 @@
     <main class="app">
       <aside class="sidebar">
         <div>
-          <h1>ЗТТ Pulse</h1>
+          <h1>ЗТТ</h1>
           <p>Закрытая тусовка трафагонов</p>
         </div>
-
-        <nav class="nav">
-          <a class="active" href="#dashboard">Пульс</a>
-          <a href="#entry">Ввод дня</a>
-          <a href="#history">История</a>
-        </nav>
       </aside>
 
       <section class="content">
         <header class="topbar">
           <div>
-            <span class="eyebrow">Операционный пульс ЗТТ</span>
-            <h2>Пульс продукта по последним дням</h2>
+            <span class="eyebrow">Статистика</span>
+            <h2>ЗТТ</h2>
           </div>
-          <div class="range-tabs" aria-label="Период">
-            <button data-range="1">1 день</button>
-            <button class="active" data-range="7">7 дней</button>
-            <button data-range="14">14 дней</button>
-            <button data-range="30">30 дней</button>
-            <button data-range="thisMonth">Этот месяц</button>
-            <button data-range="lastMonth">Прошлый месяц</button>
-            <button data-range="all">Всё время</button>
+          <div class="period-control">
+            <div class="range-tabs" aria-label="Период">
+              <button data-range="1">1 день</button>
+              <button class="active" data-range="7">7 дней</button>
+              <button data-range="14">14 дней</button>
+              <button data-range="30">30 дней</button>
+              <button data-range="thisMonth">Этот месяц</button>
+              <button data-range="lastMonth">Прошлый месяц</button>
+              <button data-range="all">Всё время</button>
+              <button data-range="custom">Свой период</button>
+            </div>
+            <div class="custom-range hidden" id="customRange">
+              <input id="customStart" type="date" aria-label="Начало периода" />
+              <input id="customEnd" type="date" aria-label="Конец периода" />
+            </div>
           </div>
         </header>
 
@@ -176,9 +179,8 @@
           <div class="panel-head">
             <div>
               <span class="eyebrow">История</span>
-              <h3>Последние 7 дней</h3>
+              <h3>Всё время</h3>
             </div>
-            <button class="ghost" id="resetData" type="button">Сбросить демо</button>
           </div>
           <div class="table-wrap">
             <table>

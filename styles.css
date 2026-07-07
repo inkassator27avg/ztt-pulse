@@ -18,6 +18,10 @@
   box-sizing: border-box;
 }
 
+.hidden {
+  display: none !important;
+}
+
 body {
   margin: 0;
   min-width: 320px;
@@ -207,6 +211,25 @@ h1 {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel);
+}
+
+.period-control {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.custom-range {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  justify-content: flex-end;
+}
+
+.custom-range input {
+  width: 154px;
+  min-height: 36px;
 }
 
 .range-tabs button,
@@ -793,12 +816,20 @@ td {
   }
 
   .sidebar {
-    position: static;
+    position: relative;
     height: auto;
     gap: 20px;
     padding: 18px 16px 12px;
     border-right: 0;
     border-bottom: 1px solid var(--line);
+  }
+
+  .sidebar h1 {
+    font-size: 24px;
+  }
+
+  .sidebar p {
+    max-width: 240px;
   }
 
   .nav {
@@ -817,10 +848,25 @@ td {
   .topbar {
     position: sticky;
     top: 0;
+    z-index: 30;
     align-items: flex-start;
     flex-direction: column;
     margin: 0 -16px;
     padding: 12px 16px;
+    border-bottom: 1px solid rgba(37, 37, 57, 0.8);
+  }
+
+  .topbar .eyebrow {
+    display: none;
+  }
+
+  .topbar h2 {
+    font-size: 24px;
+  }
+
+  .period-control {
+    width: 100%;
+    justify-items: stretch;
   }
 
   .range-tabs {
@@ -837,6 +883,20 @@ td {
   .range-tabs button {
     flex: 0 0 auto;
     min-width: max-content;
+    min-height: 38px;
+  }
+
+  .custom-range {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .custom-range.hidden {
+    display: none !important;
+  }
+
+  .custom-range input {
+    width: 100%;
   }
 
   .kpi-grid {
@@ -853,6 +913,23 @@ td {
 
   .mini-chart {
     min-height: 360px;
+  }
+
+  .day-title h3 {
+    font-size: 20px;
+  }
+
+  .metric-strip {
+    gap: 8px;
+  }
+
+  .metric-strip span {
+    min-height: 42px;
+  }
+
+  .table-wrap {
+    margin-right: -16px;
+    padding-right: 16px;
   }
 }
 
@@ -876,7 +953,8 @@ td {
   .chart-panel,
   .history-panel,
   .entry-panel {
-    padding: 14px;
+    padding: 13px;
+    border-radius: 7px;
   }
 
   .chart-title {
@@ -891,5 +969,23 @@ td {
 
   .data-chart {
     margin-right: -4px;
+  }
+
+  .chart-svg {
+    min-width: 620px;
+  }
+
+  .entry-form {
+    gap: 10px;
+  }
+
+  input,
+  .entry-form button,
+  .calculated-revenue {
+    min-height: 46px;
+  }
+
+  table {
+    min-width: 920px;
   }
 }
