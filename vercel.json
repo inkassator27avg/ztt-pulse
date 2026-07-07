@@ -4,6 +4,10 @@
     {
       "path": "/api/sync-meta",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/sync-instagram",
+      "schedule": "10 3 * * *"
     }
   ],
   "headers": [
