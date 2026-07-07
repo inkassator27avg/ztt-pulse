@@ -1,3 +1,9 @@
+  const igViewsSeries = [{ color: "#2f89ff", values: igViews }];
+  const ttViewsSeries = [{ color: "#38bdf8", values: ttViews }];
+  const tgSeries = [{ color: "#5ee15a", values: growth, type: "bar" }];
+  const salesRevenueSeries = [{ color: "#c084fc", values: salesRevenue }];
+
+  drawTelegramChart("#contentChart", contentSeries, labels);
   drawTelegramChart("#igViewsChart", igViewsSeries, labels);
   drawTelegramChart("#ttViewsChart", ttViewsSeries, labels);
   drawTelegramChart("#tgGrowthChart", tgSeries, labels);
