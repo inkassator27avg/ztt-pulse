@@ -536,6 +536,26 @@ h1 {
   opacity: 1;
 }
 
+.chart-empty {
+  min-height: 220px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.empty-state {
+  min-height: 160px;
+}
+
+.empty-state p {
+  margin: 10px 0 0;
+  max-width: 560px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
 .chart-legend {
   display: flex;
   gap: 8px;

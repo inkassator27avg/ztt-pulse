@@ -16,16 +16,6 @@ const supabaseConfig = {
 const dashboardPassword = "inka27avg!";
 const authStorageKey = "ztt-pulse-unlocked-v2";
 
-const demoEntries = [
-  { date: "2026-07-01", adSpend: 21, leads: 13, telegram: 2362, instagram: 4318, tiktokFollowers: 820, reels: 1, tiktoks: 1, views: 7200, sales29: 2, sales49: 0, sales99: 0, renewals29: 0, renewals49: 0, renewals99: 0 },
-  { date: "2026-07-02", adSpend: 34, leads: 18, telegram: 2379, instagram: 4332, tiktokFollowers: 829, reels: 2, tiktoks: 0, views: 12800, sales29: 0, sales49: 1, sales99: 0, renewals29: 0, renewals49: 1, renewals99: 0 },
-  { date: "2026-07-03", adSpend: 39, leads: 24, telegram: 2401, instagram: 4358, tiktokFollowers: 846, reels: 1, tiktoks: 2, views: 19600, sales29: 3, sales49: 1, sales99: 0, renewals29: 1, renewals49: 0, renewals99: 0 },
-  { date: "2026-07-04", adSpend: 28, leads: 11, telegram: 2410, instagram: 4364, tiktokFollowers: 853, reels: 0, tiktoks: 1, views: 4100, sales29: 0, sales49: 1, sales99: 0, renewals29: 0, renewals49: 0, renewals99: 0 },
-  { date: "2026-07-05", adSpend: 42, leads: 29, telegram: 2438, instagram: 4392, tiktokFollowers: 874, reels: 2, tiktoks: 1, views: 22400, sales29: 3, sales49: 1, sales99: 1, renewals29: 0, renewals49: 1, renewals99: 0 },
-  { date: "2026-07-06", adSpend: 36, leads: 17, telegram: 2451, instagram: 4401, tiktokFollowers: 881, reels: 1, tiktoks: 0, views: 9900, sales29: 2, sales49: 1, sales99: 0, renewals29: 0, renewals49: 0, renewals99: 0 },
-  { date: "2026-07-07", adSpend: 38, leads: 21, telegram: 2470, instagram: 4420, tiktokFollowers: 902, reels: 2, tiktoks: 1, views: 18500, sales29: 2, sales49: 1, sales99: 1, renewals29: 1, renewals49: 1, renewals99: 0 },
-];
-
 let selectedRange = "7";
 let entries = normalizeEntries(loadEntries());
 let supabaseReady = false;
@@ -47,10 +37,10 @@ const lockError = document.querySelector("#lockError");
 
 function loadEntries() {
   const stored = localStorage.getItem("ztt-pulse-entries");
-  if (!stored) return demoEntries;
+  if (!stored) return [];
 
   const parsed = JSON.parse(stored);
-  return Array.isArray(parsed) && parsed.length ? parsed : demoEntries;
+  return Array.isArray(parsed) ? parsed : [];
 }
 
 function toDbRow(row) {
@@ -122,8 +112,8 @@ async function loadEntriesFromSupabase() {
     if (Array.isArray(rows) && rows.length) {
       entries = normalizeEntries(rows.map(fromDbRow));
       saveEntries();
-    } else if (!entries.length) {
-      entries = normalizeEntries(demoEntries);
+    } else {
+      entries = [];
       saveEntries();
     }
     supabaseReady = true;
@@ -329,6 +319,19 @@ function periodLabel() {
 
 function renderCompare() {
   const sorted = sortedEntries();
+  if (!sorted.length) {
+    compareGrid.innerHTML = `
+      <article class="day-card focus empty-state">
+        <span class="eyebrow">Последний отчёт</span>
+        <h3>Данных пока нет</h3>
+        <p>Когда появится первая строка в базе, здесь будет свежая сводка.</p>
+      </article>
+    `;
+    const signal = document.querySelector("#growthSignal");
+    signal.textContent = periodLabel();
+    return;
+  }
+
   const lastReport = summarize(latest(sorted), sorted);
   const previousReport = summarize(sorted[sorted.length - 2] || {}, sorted);
 
@@ -533,6 +536,22 @@ function renderDataChart(chartId, series, labels, options = {}) {
 function renderCharts() {
   const sorted = sortedEntries();
   const rows = scopedEntries();
+  if (!rows.length) {
+    document.querySelector("#contentTotal").textContent = "0";
+    document.querySelector("#igViewsTotal").textContent = "0";
+    document.querySelector("#ttViewsTotal").textContent = "0";
+    document.querySelector("#tgGrowthTotal").textContent = "+0";
+    document.querySelector("#salesRevenueTotal").textContent = money(0);
+    document.querySelectorAll("[data-period-label]").forEach((item) => {
+      item.textContent = periodLabel();
+    });
+    ["#contentChart", "#igViewsChart", "#ttViewsChart", "#tgGrowthChart", "#salesRevenueChart"].forEach((selector) => {
+      const chart = document.querySelector(selector);
+      if (chart) chart.innerHTML = `<div class="chart-empty">Данных пока нет</div>`;
+    });
+    return;
+  }
+
   const labels = rows.map((row) => row.date);
   const growth = rows.map((row) => Math.max(telegramGrowth(row, sorted), 0));
   const reels = rows.map((row) => Number(row.reels || 0));
@@ -569,6 +588,18 @@ function renderCharts() {
 function renderSummary() {
   const sorted = sortedEntries();
   const rows = scopedEntries();
+  if (!rows.length) {
+    periodSummary.innerHTML = `
+      <p>За ${periodLabel()} данных пока нет.</p>
+      <div class="summary-strip">
+        <span>Выручка <b>${money(0)}</b></span>
+        <span>Чистые <b>${money(0)}</b></span>
+        <span>Продажи ЗТТ <b>0</b></span>
+      </div>
+    `;
+    return;
+  }
+
   const views = rows.reduce((sum, row) => sum + rowViews(row), 0);
   const igViews = total(rows, "igViews");
   const ttViews = total(rows, "ttViews");
@@ -610,13 +641,18 @@ function renderSummary() {
 }
 
 function renderHistory() {
-  const sorted = sortedEntries();
-  historyRows.innerHTML = sorted
+  const chronological = sortedEntries();
+  if (!chronological.length) {
+    historyRows.innerHTML = `<tr><td colspan="11">Данных пока нет</td></tr>`;
+    return;
+  }
+
+  historyRows.innerHTML = [...chronological]
     .reverse()
     .map((row) => {
       const revenue = rowRevenue(row);
       const profit = revenue - row.adSpend;
-      const tgGrowth = telegramGrowth(row, sorted);
+      const tgGrowth = telegramGrowth(row, chronological);
       return `
         <tr>
           <td>${formatDate(row.date)}</td>
@@ -712,7 +748,7 @@ form.addEventListener("submit", async (event) => {
 });
 
 resetButton?.addEventListener("click", () => {
-  entries = normalizeEntries(demoEntries);
+  entries = [];
   saveEntries();
   fillFormDefaults();
   render();
