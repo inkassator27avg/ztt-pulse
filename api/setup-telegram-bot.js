@@ -48,7 +48,7 @@ export default async function handler(req, res) {
         { command: "today", description: "Статистика за сегодня" },
         { command: "yesterday", description: "Статистика за вчера" },
         { command: "all", description: "Статистика за все время" },
-        { command: "help", description: "Как пользоваться ботом" },
+        { command: "help", description: "Как пользоваться Кариной" },
       ],
     });
 
