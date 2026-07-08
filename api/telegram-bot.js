@@ -131,6 +131,16 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
+function getOpenAiKey() {
+  return (
+    process.env.OPENAI_API_KEY ||
+    process.env.OPENAI_KEY ||
+    process.env.OPENAI_TOKEN ||
+    process.env.OPENAI_API_TOKEN ||
+    ""
+  );
+}
+
 function money(value) {
   return `$${Math.round(Number(value || 0)).toLocaleString("en-US")}`;
 }
@@ -423,7 +433,9 @@ function extractOpenAiText(body) {
 }
 
 async function askKarina(text) {
-  if (!process.env.OPENAI_API_KEY) {
+  const openAiKey = getOpenAiKey();
+
+  if (!openAiKey) {
     return [
       "<b>AI-режим еще не включен.</b>",
       "В Vercel нужно добавить переменную <code>OPENAI_API_KEY</code>.",
@@ -435,7 +447,7 @@ async function askKarina(text) {
   const response = await fetchWithTimeout("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      Authorization: `Bearer ${openAiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -502,7 +514,7 @@ export default async function handler(req, res) {
         ...(hasValidSetupSecret(req)
           ? {
               telegramConfigured: Boolean(process.env.TELEGRAM_BOT_TOKEN),
-              openAiConfigured: Boolean(process.env.OPENAI_API_KEY),
+              openAiConfigured: Boolean(getOpenAiKey()),
               model: process.env.OPENAI_MODEL || defaultOpenAiModel,
             }
           : {}),
