@@ -36,7 +36,9 @@ function getReportChatId() {
 }
 
 function checkSecret(req) {
-  if (!process.env.SYNC_SECRET) return;
+  if (!process.env.SYNC_SECRET) {
+    throw new Error("Sync secret is not configured.");
+  }
   if (req.headers["x-vercel-cron"]) return;
 
   const querySecret = Array.isArray(req.query?.secret) ? req.query.secret[0] : req.query?.secret;
