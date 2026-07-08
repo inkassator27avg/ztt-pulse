@@ -1,12 +1,9 @@
 const requiredEnv = ["SUPABASE_URL", "SUPABASE_KEY", "TELEGRAM_BOT_TOKEN"];
+const defaultOpenAiModel = "gpt-4.1-mini";
 
 function sendJson(res, status, response) {
   res.status(status).setHeader("content-type", "application/json; charset=utf-8");
   res.end(JSON.stringify(response, null, 2));
-}
-
-function isoDate(date) {
-  return date.toISOString().slice(0, 10);
 }
 
 function dateInYekaterinburg(offsetDays = 0) {
@@ -70,25 +67,68 @@ async function supabaseRequest(path, options = {}) {
   return text ? JSON.parse(text) : null;
 }
 
-async function sendTelegram(chatId, text, replyToMessageId = null) {
-  const response = await fetchWithTimeout(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+async function telegram(method, payload, timeoutMs = 15000) {
+  const response = await fetchWithTimeout(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/${method}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text,
-      parse_mode: "HTML",
-      disable_web_page_preview: true,
-      ...(replyToMessageId ? { reply_to_message_id: replyToMessageId } : {}),
-    }),
-  });
+    body: JSON.stringify(payload),
+  }, timeoutMs);
   const body = await response.json().catch(() => ({}));
 
   if (!response.ok || body.ok === false) {
-    throw new Error(body?.description || "Telegram sendMessage failed.");
+    throw new Error(body?.description || `Telegram ${method} failed.`);
   }
 
   return body;
+}
+
+async function sendTelegram(chatId, text, replyToMessageId = null) {
+  const chunks = splitTelegramMessage(text);
+  let result = null;
+
+  for (const chunk of chunks) {
+    result = await telegram("sendMessage", {
+      chat_id: chatId,
+      text: chunk,
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+      ...(replyToMessageId ? { reply_to_message_id: replyToMessageId } : {}),
+    });
+  }
+
+  return result;
+}
+
+async function sendTyping(chatId) {
+  try {
+    await telegram("sendChatAction", { chat_id: chatId, action: "typing" }, 5000);
+  } catch {
+    // Typing indicator is cosmetic; ignore failures.
+  }
+}
+
+function splitTelegramMessage(text) {
+  const maxLength = 3900;
+  if (String(text).length <= maxLength) return [String(text)];
+
+  const chunks = [];
+  let rest = String(text);
+  while (rest.length > maxLength) {
+    const cut = rest.lastIndexOf("\n", maxLength);
+    const index = cut > 1000 ? cut : maxLength;
+    chunks.push(rest.slice(0, index));
+    rest = rest.slice(index).trimStart();
+  }
+  if (rest) chunks.push(rest);
+  return chunks;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function money(value) {
@@ -135,8 +175,39 @@ async function getDailyEntry(date) {
   return rows?.[0] || null;
 }
 
+async function getEntries(limit = 30, order = "desc") {
+  return supabaseRequest(`daily_entries?select=*&order=date.${order}&limit=${limit}`);
+}
+
 async function getAllEntries() {
   return supabaseRequest("daily_entries?select=*&order=date.asc");
+}
+
+function summarizeRows(rows = []) {
+  return rows.reduce((acc, row) => {
+    acc.revenue += revenue(row);
+    acc.adSpend += Number(row.ad_spend || 0);
+    acc.sales += sales(row);
+    acc.igViews += Number(row.ig_views || 0);
+    acc.ttViews += Number(row.tt_views || 0);
+    acc.tgGrowth += Number(row.telegram_growth ?? row.telegram_joined ?? 0);
+    acc.tgJoined += Number(row.telegram_joined || 0);
+    acc.tgLeft += Number(row.telegram_left || 0);
+    acc.reels += Number(row.reels || 0);
+    acc.tiktoks += Number(row.tiktoks || 0);
+    return acc;
+  }, {
+    revenue: 0,
+    adSpend: 0,
+    sales: 0,
+    igViews: 0,
+    ttViews: 0,
+    tgGrowth: 0,
+    tgJoined: 0,
+    tgLeft: 0,
+    reels: 0,
+    tiktoks: 0,
+  });
 }
 
 function buildDailyStats(row) {
@@ -189,27 +260,7 @@ async function getAttributionSummary() {
 async function buildAllTimeStats() {
   const rows = await getAllEntries();
   const summary = await getAttributionSummary().catch(() => null);
-
-  const totals = (rows || []).reduce((acc, row) => {
-    acc.revenue += revenue(row);
-    acc.adSpend += Number(row.ad_spend || 0);
-    acc.sales += sales(row);
-    acc.igViews += Number(row.ig_views || 0);
-    acc.ttViews += Number(row.tt_views || 0);
-    acc.tgGrowth += Number(row.telegram_growth ?? row.telegram_joined ?? 0);
-    acc.reels += Number(row.reels || 0);
-    acc.tiktoks += Number(row.tiktoks || 0);
-    return acc;
-  }, {
-    revenue: 0,
-    adSpend: 0,
-    sales: 0,
-    igViews: 0,
-    ttViews: 0,
-    tgGrowth: 0,
-    reels: 0,
-    tiktoks: 0,
-  });
+  const totals = summarizeRows(rows || []);
 
   const lines = [
     "<b>ЗТТ: статистика за все время</b>",
@@ -287,15 +338,15 @@ function buildSaleReply(result) {
   const sale = result.sale || {};
   const days = sale.days_to_purchase;
   const username = sale.telegram_username ? `@${sale.telegram_username}` : sale.lookup_key;
-  const matchedText = result.matched ? "нашёл в базе" : "не нашёл в базе";
+  const matchedText = result.matched ? "нашел в базе" : "не нашел в базе";
   const daysText = Number.isFinite(Number(days)) ? `${days} дн.` : "не посчиталось";
   const averageText = Number.isFinite(Number(result.averageDaysToPurchase))
     ? `\nСреднее до покупки сейчас: <b>${result.averageDaysToPurchase} дн.</b>`
     : "";
 
   return [
-    `<b>Готово, продажу занёс.</b>`,
-    `${username}: ${matchedText}`,
+    "<b>Готово, продажу занес.</b>",
+    `${escapeHtml(username)}: ${matchedText}`,
     `Время в TG до покупки: <b>${daysText}</b>`,
     result.daily?.updated ? `Дневная продажа обновлена: ${result.daily.column}` : `Дневная продажа не обновлена: ${result.daily?.reason || "тариф не понял"}`,
     averageText,
@@ -304,18 +355,107 @@ function buildSaleReply(result) {
 
 function helpMessage(chatId) {
   return [
-    "<b>Команды ЗТТ-бота</b>",
+    "<b>Карина, ЗТТ-бот</b>",
     "",
-    "статистика за сегодня",
-    "статистика за вчера",
-    "статистика за все время",
+    "Я умею отвечать как ассистент и доставать статистику.",
     "",
-    "Продажу кидай так:",
+    "<b>Команды:</b>",
+    "/today — статистика за сегодня",
+    "/yesterday — статистика за вчера",
+    "/all — статистика за все время",
+    "",
+    "<b>Продажу кидай так:</b>",
     "купил @username 29",
     "купил 123456789 49",
     "",
+    "Обычным текстом можешь спрашивать что угодно по ЗТТ, рекламе, контенту и продажам.",
+    "",
     `ID этого чата: <code>${chatId}</code>`,
   ].join("\n");
+}
+
+function karinaInstructions() {
+  return [
+    "Ты Карина — Telegram-ассистент Даниила по проекту ЗТТ.",
+    "ЗТТ — закрытая тусовка трафагонов, подписочный продукт.",
+    "Отвечай по-русски, на ты, коротко и по делу.",
+    "Стиль живой, спокойный, без канцелярита. Можно быть прямой, но не груби без причины.",
+    "Главная задача: помогать Даниилу понимать статистику, продажи, рекламу, контент и следующие действия.",
+    "Если данных не хватает, честно скажи, чего не хватает.",
+    "Не выдумывай цифры: используй только контекст из дашборда или явно говори, что это предположение.",
+    "Если видишь проблему в данных, назови ее и предложи простой следующий шаг.",
+  ].join("\n");
+}
+
+async function buildAssistantContext() {
+  const rows = await getEntries(30, "desc").catch(() => []);
+  const latest = rows?.[0] || null;
+  const yesterday = await getDailyEntry(dateInYekaterinburg(-1)).catch(() => null);
+  const totals7 = summarizeRows((rows || []).slice(0, 7));
+  const totals30 = summarizeRows(rows || []);
+  const attribution = await getAttributionSummary().catch(() => null);
+
+  return [
+    "Контекст дашборда ЗТТ:",
+    `Сегодня по Екатеринбургу: ${dateInYekaterinburg()}`,
+    latest ? `Последняя строка: ${latest.date}, выручка ${money(revenue(latest))}, реклама ${money(latest.ad_spend)}, IG views ${number(latest.ig_views)}, TG прирост +${number(latest.telegram_growth ?? latest.telegram_joined ?? 0)}, продажи ${number(sales(latest))}.` : "Последней строки в базе нет.",
+    yesterday ? `Вчера: ${yesterday.date}, выручка ${money(revenue(yesterday))}, реклама ${money(yesterday.ad_spend)}, IG views ${number(yesterday.ig_views)}, TG прирост +${number(yesterday.telegram_growth ?? yesterday.telegram_joined ?? 0)}, продажи ${number(sales(yesterday))}.` : "Строки за вчера нет.",
+    `За 7 последних строк: выручка ${money(totals7.revenue)}, реклама ${money(totals7.adSpend)}, чистые ${money(totals7.revenue - totals7.adSpend)}, Reels ${number(totals7.reels)}, TikTok ${number(totals7.tiktoks)}, IG views ${number(totals7.igViews)}, TT views ${number(totals7.ttViews)}, TG прирост +${number(totals7.tgGrowth)}, продажи ${number(totals7.sales)}.`,
+    `За 30 последних строк: выручка ${money(totals30.revenue)}, реклама ${money(totals30.adSpend)}, чистые ${money(totals30.revenue - totals30.adSpend)}, Reels ${number(totals30.reels)}, TikTok ${number(totals30.tiktoks)}, IG views ${number(totals30.igViews)}, TT views ${number(totals30.ttViews)}, TG прирост +${number(totals30.tgGrowth)}, продажи ${number(totals30.sales)}.`,
+    attribution?.average !== null && attribution?.average !== undefined
+      ? `Атрибуция продаж: ${number(attribution.salesCount)} продаж, найдено в TG-базе ${number(attribution.matchedSalesCount)}, среднее время до покупки ${attribution.average} дн.`
+      : "Атрибуция продаж пока без среднего времени до покупки.",
+  ].join("\n");
+}
+
+function extractOpenAiText(body) {
+  if (typeof body?.output_text === "string" && body.output_text.trim()) return body.output_text.trim();
+
+  const chunks = [];
+  for (const item of body?.output || []) {
+    for (const content of item?.content || []) {
+      if (typeof content?.text === "string") chunks.push(content.text);
+      if (typeof content?.output_text === "string") chunks.push(content.output_text);
+    }
+  }
+
+  return chunks.join("\n").trim();
+}
+
+async function askKarina(text) {
+  if (!process.env.OPENAI_API_KEY) {
+    return [
+      "<b>AI-режим еще не включен.</b>",
+      "В Vercel нужно добавить переменную <code>OPENAI_API_KEY</code>.",
+      "Статистика и запись продаж при этом уже работают.",
+    ].join("\n");
+  }
+
+  const context = await buildAssistantContext();
+  const response = await fetchWithTimeout("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: process.env.OPENAI_MODEL || defaultOpenAiModel,
+      instructions: karinaInstructions(),
+      input: `${context}\n\nСообщение Даниила:\n${String(text || "").slice(0, 3000)}`,
+      max_output_tokens: 900,
+    }),
+  }, 30000);
+
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = body?.error?.message || `OpenAI error ${response.status}`;
+    return `<b>AI сейчас не ответил.</b>\n${escapeHtml(message)}`;
+  }
+
+  const answer = extractOpenAiText(body);
+  if (!answer) return "AI ответил пусто. Попробуй переформулировать.";
+
+  return escapeHtml(answer);
 }
 
 async function handleText(req, chatId, messageId, text) {
@@ -343,13 +483,30 @@ async function handleText(req, chatId, messageId, text) {
     return buildSaleReply(result);
   }
 
-  return "Не понял сообщение. Напиши /help или кинь продажу в формате: купил @username 29";
+  await sendTyping(chatId);
+  return askKarina(text);
+}
+
+function hasValidSetupSecret(req) {
+  const querySecret = Array.isArray(req.query?.secret) ? req.query.secret[0] : req.query?.secret;
+  const headerSecret = req.headers["x-sync-secret"];
+  return Boolean(process.env.SYNC_SECRET && (querySecret === process.env.SYNC_SECRET || headerSecret === process.env.SYNC_SECRET));
 }
 
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
-      return sendJson(res, 200, { ok: true, message: "Telegram bot endpoint is ready." });
+      return sendJson(res, 200, {
+        ok: true,
+        message: "Telegram bot endpoint is ready.",
+        ...(hasValidSetupSecret(req)
+          ? {
+              telegramConfigured: Boolean(process.env.TELEGRAM_BOT_TOKEN),
+              openAiConfigured: Boolean(process.env.OPENAI_API_KEY),
+              model: process.env.OPENAI_MODEL || defaultOpenAiModel,
+            }
+          : {}),
+      });
     }
 
     checkEnv();
