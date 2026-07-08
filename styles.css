@@ -434,7 +434,8 @@ h1 {
 
 .chart-panel,
 .history-panel,
-.entry-panel {
+.entry-panel,
+.attribution-panel {
   padding: 18px;
 }
 
@@ -744,6 +745,42 @@ h1 {
   font-size: 18px;
 }
 
+.attribution-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.attribution-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.attribution-kpi {
+  min-height: 74px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(7, 7, 13, 0.46);
+}
+
+.attribution-kpi span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.attribution-kpi strong {
+  display: block;
+  margin-top: 9px;
+  font-size: 21px;
+  line-height: 1;
+}
+
+.attribution-wrap table {
+  min-width: 760px;
+}
+
 .entry-form {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1013,6 +1050,7 @@ td {
   .metric-strip,
   .chart-grid,
   .summary-strip,
+  .attribution-stats,
   .entry-form {
     grid-template-columns: 1fr;
   }
@@ -1106,7 +1144,8 @@ td {
   .panel,
   .chart-panel,
   .history-panel,
-  .entry-panel {
+  .entry-panel,
+  .attribution-panel {
     padding: 13px;
     border-radius: 7px;
   }

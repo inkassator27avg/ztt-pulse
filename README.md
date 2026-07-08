@@ -1,21 +1,240 @@
-# ЗТТ Pulse
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ЗТТ</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="./assets/favicon-32.png" />
+    <link rel="apple-touch-icon" href="./assets/favicon-180.png" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <section class="lock-screen" id="lockScreen">
+      <form class="lock-card" id="lockForm">
+        <h1>ЗТТ</h1>
+        <p>Введите пароль для доступа к дашборду.</p>
+        <input id="passwordInput" type="password" placeholder="Пароль" autocomplete="current-password" />
+        <button type="submit">Войти</button>
+        <span id="lockError"></span>
+      </form>
+    </section>
 
-Статический MVP-дэшборд для ЗТТ.
+    <main class="app">
+      <aside class="sidebar">
+        <div>
+          <h1>ЗТТ</h1>
+          <p>Закрытая тусовка трафагонов</p>
+        </div>
+      </aside>
 
-## Деплой на Vercel
+      <section class="content">
+        <header class="topbar">
+          <div>
+            <span class="eyebrow">Статистика</span>
+            <h2>ЗТТ</h2>
+          </div>
+          <div class="period-control">
+            <div class="sync-control">
+              <button class="sync-button" id="refreshStats" type="button">Обновить статистику</button>
+              <span class="sync-status" id="refreshStatus"></span>
+            </div>
+            <div class="range-tabs" aria-label="Период">
+              <button data-range="1">1 день</button>
+              <button class="active" data-range="7">7 дней</button>
+              <button data-range="14">14 дней</button>
+              <button data-range="30">30 дней</button>
+              <button data-range="thisMonth">Этот месяц</button>
+              <button data-range="lastMonth">Прошлый месяц</button>
+              <button data-range="all">Всё время</button>
+              <button data-range="custom">Свой период</button>
+            </div>
+            <div class="custom-range hidden" id="customRange">
+              <input id="customStart" type="date" aria-label="Начало периода" />
+              <input id="customEnd" type="date" aria-label="Конец периода" />
+            </div>
+          </div>
+        </header>
 
-1. Создай GitHub-репозиторий `ztt-pulse`.
-2. Загрузи в него файлы из этой папки.
-3. В Vercel нажми **Add New Project**.
-4. Выбери репозиторий `ztt-pulse`.
-5. Framework Preset: **Other**.
-6. Build Command: оставить пустым.
-7. Output Directory: оставить пустым или `.`.
-8. Нажми **Deploy**.
+        <section id="dashboard" class="day-compare" aria-label="Последние дни"></section>
 
-После деплоя Vercel даст ссылку вида:
+        <section class="main-grid">
+          <div class="panel chart-panel">
+            <div class="panel-head">
+              <div>
+                <span class="eyebrow">Динамика</span>
+                <h3>Графики по дням</h3>
+              </div>
+              <span class="signal" id="growthSignal">Период</span>
+            </div>
 
-```text
-https://ztt-pulse.vercel.app
-```
+            <div class="chart-grid">
+              <div class="mini-chart tg-style">
+                <div class="chart-title">
+                  <span>Выложено контента</span>
+                  <strong id="contentTotal">0</strong>
+                </div>
+                <small class="chart-period" data-period-label></small>
+                <div class="data-chart" id="contentChart" aria-label="Content chart"></div>
+              </div>
 
+              <div class="mini-chart tg-style">
+                <div class="chart-title">
+                  <span>Просмотры Instagram</span>
+                  <strong id="igViewsTotal">0</strong>
+                </div>
+                <small class="chart-period" data-period-label></small>
+                <div class="data-chart" id="igViewsChart" aria-label="Instagram views chart"></div>
+              </div>
+
+              <div class="mini-chart tg-style">
+                <div class="chart-title">
+                  <span>Просмотры TikTok</span>
+                  <strong id="ttViewsTotal">0</strong>
+                </div>
+                <small class="chart-period" data-period-label></small>
+                <div class="data-chart" id="ttViewsChart" aria-label="TikTok views chart"></div>
+              </div>
+
+              <div class="mini-chart tg-style">
+                <div class="chart-title">
+                  <span>Telegram</span>
+                  <strong id="tgGrowthTotal">0</strong>
+                </div>
+                <small class="chart-period" data-period-label></small>
+                <div class="data-chart" id="tgGrowthChart" aria-label="Telegram growth chart"></div>
+              </div>
+
+              <div class="mini-chart tg-style">
+                <div class="chart-title">
+                  <span>Продажи, $</span>
+                  <strong id="salesRevenueTotal">0</strong>
+                </div>
+                <small class="chart-period" data-period-label></small>
+                <div class="data-chart" id="salesRevenueChart" aria-label="Sales revenue chart"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel entry-panel" id="entry">
+            <div class="panel-head">
+              <div>
+                <span class="eyebrow">Ввод</span>
+                <h3>Цифры за день</h3>
+              </div>
+            </div>
+
+            <form id="entryForm" class="entry-form">
+              <label>
+                Дата
+                <input name="date" type="date" required />
+              </label>
+
+              <div class="auto-note">
+                Реклама, лиды, Instagram, Telegram, Reels, TikTok и просмотры должны подтягиваться автоматически. Вручную тут заносим только деньги.
+              </div>
+
+              <div class="form-section">Новые продажи</div>
+              <label>
+                $29 / 1 месяц
+                <input name="sales29" type="number" min="0" step="1" />
+              </label>
+              <label>
+                $49 / 3 месяца
+                <input name="sales49" type="number" min="0" step="1" />
+              </label>
+              <label>
+                $99 / 12 месяцев
+                <input name="sales99" type="number" min="0" step="1" />
+              </label>
+
+              <div class="form-section">Продления</div>
+              <label>
+                $29 / 1 месяц
+                <input name="renewals29" type="number" min="0" step="1" />
+              </label>
+              <label>
+                $49 / 3 месяца
+                <input name="renewals49" type="number" min="0" step="1" />
+              </label>
+              <label>
+                $99 / 12 месяцев
+                <input name="renewals99" type="number" min="0" step="1" />
+              </label>
+
+              <div class="calculated-revenue" id="calculatedRevenue">Выручка: $0</div>
+              <button type="submit">Сохранить день</button>
+            </form>
+          </div>
+        </section>
+
+        <section class="single-grid">
+          <div class="panel insight-panel">
+            <div class="panel-head">
+              <div>
+                <span class="eyebrow">Вывод</span>
+                <h3>Итог за выбранный период</h3>
+              </div>
+            </div>
+            <div class="period-summary" id="periodSummary"></div>
+          </div>
+        </section>
+
+        <section class="panel attribution-panel" id="attribution">
+          <div class="panel-head">
+            <div>
+              <span class="eyebrow">Продажи по людям</span>
+              <h3>Время от Telegram до покупки</h3>
+            </div>
+          </div>
+          <div class="attribution-stats" id="attributionStats"></div>
+          <div class="table-wrap attribution-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Дата</th>
+                  <th>Покупатель</th>
+                  <th>Тариф</th>
+                  <th>Сумма</th>
+                  <th>Дней до покупки</th>
+                  <th>В TG с</th>
+                </tr>
+              </thead>
+              <tbody id="attributionRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel history-panel" id="history">
+          <div class="panel-head">
+            <div>
+              <span class="eyebrow">История</span>
+              <h3>Всё время</h3>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Дата</th>
+                  <th>Выручка</th>
+                  <th>Реклама</th>
+                  <th>Профит</th>
+                  <th>Reels</th>
+                  <th>IG views</th>
+                  <th>Пдп в IG</th>
+                  <th>TikTok</th>
+                  <th>TT views</th>
+                  <th>Прирост TG</th>
+                  <th>Продажи</th>
+                </tr>
+              </thead>
+              <tbody id="historyRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="./script.js"></script>
+  </body>
+</html>

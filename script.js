@@ -19,6 +19,7 @@ const syncSecret = "ztt-meta-sync-2026";
 
 let selectedRange = "7";
 let entries = normalizeEntries(loadEntries());
+let attributionRows = [];
 let supabaseReady = false;
 
 const form = document.querySelector("#entryForm");
@@ -37,6 +38,8 @@ const passwordInput = document.querySelector("#passwordInput");
 const lockError = document.querySelector("#lockError");
 const refreshStatsButton = document.querySelector("#refreshStats");
 const refreshStatus = document.querySelector("#refreshStatus");
+const attributionStats = document.querySelector("#attributionStats");
+const attributionRowsEl = document.querySelector("#attributionRows");
 
 function loadEntries() {
   const stored = localStorage.getItem("ztt-pulse-entries");
@@ -132,6 +135,17 @@ async function loadEntriesFromSupabase() {
   }
 }
 
+async function loadAttributionFromSupabase() {
+  if (!attributionRowsEl) return;
+  try {
+    const rows = await supabaseRequest("sales_attribution?select=*&order=sale_date.desc,created_at.desc&limit=50");
+    attributionRows = Array.isArray(rows) ? rows : [];
+  } catch (error) {
+    attributionRows = [];
+    console.warn("Sales attribution is not ready yet.", error);
+  }
+}
+
 async function saveEntryToSupabase(entry) {
   if (!supabaseReady) return;
   try {
@@ -188,6 +202,11 @@ function saveEntries() {
 
 function money(value) {
   return `$${Math.round(value).toLocaleString("en-US")}`;
+}
+
+function moneyOrDash(value) {
+  if (value === null || value === undefined || value === "") return "-";
+  return money(Number(value || 0));
 }
 
 function number(value) {
@@ -653,6 +672,72 @@ function renderSummary() {
   `;
 }
 
+function average(values) {
+  if (!values.length) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function renderAttribution() {
+  if (!attributionStats || !attributionRowsEl) return;
+
+  if (!attributionRows.length) {
+    attributionStats.innerHTML = `
+      <div class="attribution-kpi">
+        <span>Продажи из TG</span>
+        <strong>0</strong>
+      </div>
+      <div class="attribution-kpi">
+        <span>Среднее до покупки</span>
+        <strong>-</strong>
+      </div>
+      <div class="attribution-kpi">
+        <span>Совпало с базой</span>
+        <strong>0</strong>
+      </div>
+    `;
+    attributionRowsEl.innerHTML = `<tr><td colspan="6">Пока нет продаж из TG-бота</td></tr>`;
+    return;
+  }
+
+  const matchedDays = attributionRows
+    .map((row) => Number(row.days_to_purchase))
+    .filter((value) => Number.isFinite(value));
+  const avgDays = average(matchedDays);
+
+  attributionStats.innerHTML = `
+    <div class="attribution-kpi">
+      <span>Продажи из TG</span>
+      <strong>${number(attributionRows.length)}</strong>
+    </div>
+    <div class="attribution-kpi">
+      <span>Среднее до покупки</span>
+      <strong>${avgDays === null ? "-" : `${Math.round(avgDays * 10) / 10} дн.`}</strong>
+    </div>
+    <div class="attribution-kpi">
+      <span>Совпало с базой</span>
+      <strong>${number(matchedDays.length)}</strong>
+    </div>
+  `;
+
+  attributionRowsEl.innerHTML = attributionRows
+    .slice(0, 20)
+    .map((row) => {
+      const username = row.telegram_username ? `@${row.telegram_username}` : row.lookup_key;
+      const days = Number(row.days_to_purchase);
+      return `
+        <tr>
+          <td>${formatDate(row.sale_date)}</td>
+          <td>${username || "-"}</td>
+          <td>${row.tariff || "-"}</td>
+          <td>${moneyOrDash(row.amount)}</td>
+          <td class="${Number.isFinite(days) ? "positive" : ""}">${Number.isFinite(days) ? `${number(days)} дн.` : "-"}</td>
+          <td>${row.joined_at ? formatDate(row.joined_at) : "-"}</td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
 function renderHistory() {
   const chronological = sortedEntries();
   if (!chronological.length) {
@@ -708,6 +793,7 @@ function render() {
   renderCompare();
   renderCharts();
   renderSummary();
+  renderAttribution();
   renderHistory();
 }
 
@@ -743,6 +829,7 @@ async function refreshTodayStats() {
   try {
     const result = await syncSource("/api/refresh-stats", date);
     await loadEntriesFromSupabase();
+    await loadAttributionFromSupabase();
     render();
 
     if (result.complete === false) {
@@ -814,6 +901,7 @@ form.addEventListener("submit", async (event) => {
   entries = normalizeEntries(entries.filter((item) => item.date !== entry.date).concat(entry));
   saveEntries();
   await saveEntryToSupabase(entry);
+  await loadAttributionFromSupabase();
   fillFormDefaults();
   render();
 });
@@ -829,7 +917,7 @@ function unlockDashboard() {
   localStorage.setItem(authStorageKey, "true");
   lockScreen.classList.add("hidden");
   fillFormDefaults();
-  loadEntriesFromSupabase().finally(() => {
+  Promise.all([loadEntriesFromSupabase(), loadAttributionFromSupabase()]).finally(() => {
     fillFormDefaults();
     render();
   });

@@ -1,10 +1,7 @@
-const tgtrackVersion = "2.20";
-
-const requiredEnv = ["TGTRACK_API_KEY", "SUPABASE_URL", "SUPABASE_KEY"];
+const requiredEnv = ["SUPABASE_URL", "SUPABASE_KEY", "TELEGRAM_BOT_TOKEN"];
 
 function sendJson(res, status, response) {
-  res.statusCode = status;
-  res.setHeader("content-type", "application/json; charset=utf-8");
+  res.status(status).setHeader("content-type", "application/json; charset=utf-8");
   res.end(JSON.stringify(response, null, 2));
 }
 
@@ -12,44 +9,44 @@ function isoDate(date) {
   return date.toISOString().slice(0, 10);
 }
 
-function yesterday() {
-  const date = new Date();
-  date.setUTCDate(date.getUTCDate() - 1);
-  return isoDate(date);
-}
-
-function getDate(req) {
-  const value = Array.isArray(req.query?.date) ? req.query.date[0] : req.query?.date;
-  if (!value) return yesterday();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    throw new Error("Date must be YYYY-MM-DD.");
-  }
-  return value;
+function dateInYekaterinburg(offsetDays = 0) {
+  const now = new Date();
+  now.setUTCDate(now.getUTCDate() + offsetDays);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Yekaterinburg",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 function checkEnv() {
   const missing = requiredEnv.filter((key) => !process.env[key]);
-  if (missing.length) {
-    throw new Error(`Missing env vars: ${missing.join(", ")}`);
+  if (missing.length) throw new Error(`Missing env vars: ${missing.join(", ")}`);
+}
+
+function checkWebhookSecret(req) {
+  if (!process.env.TELEGRAM_WEBHOOK_SECRET) return;
+  if (req.headers["x-telegram-bot-api-secret-token"] !== process.env.TELEGRAM_WEBHOOK_SECRET) {
+    throw new Error("Wrong Telegram webhook secret.");
   }
 }
 
-function checkSecret(req) {
-  if (!process.env.SYNC_SECRET) return;
-  if (req.headers["x-vercel-cron"]) return;
+async function readBody(req) {
+  if (req.body && typeof req.body === "object") return req.body;
+  if (typeof req.body === "string" && req.body.trim()) return JSON.parse(req.body);
 
-  const querySecret = Array.isArray(req.query?.secret) ? req.query.secret[0] : req.query?.secret;
-  const headerSecret = req.headers["x-sync-secret"];
-
-  if (querySecret !== process.env.SYNC_SECRET && headerSecret !== process.env.SYNC_SECRET) {
-    throw new Error("Wrong sync secret.");
-  }
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const text = Buffer.concat(chunks).toString("utf8");
+  return text.trim() ? JSON.parse(text) : {};
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-
   try {
     return await fetch(url, { ...options, signal: controller.signal });
   } finally {
@@ -57,198 +54,327 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
   }
 }
 
-async function fetchText(url) {
-  const response = await fetchWithTimeout(url, {
-    headers: { "User-Agent": "Mozilla/5.0" },
+async function supabaseRequest(path, options = {}) {
+  const response = await fetchWithTimeout(`${process.env.SUPABASE_URL}/rest/v1/${path}`, {
+    ...options,
+    headers: {
+      apikey: process.env.SUPABASE_KEY,
+      Authorization: `Bearer ${process.env.SUPABASE_KEY}`,
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
   });
   const text = await response.text();
 
-  if (!response.ok) {
-    throw new Error(text || `TgTrack request failed: ${response.status}`);
+  if (!response.ok) throw new Error(text || `Supabase error ${response.status}`);
+  return text ? JSON.parse(text) : null;
+}
+
+async function sendTelegram(chatId, text, replyToMessageId = null) {
+  const response = await fetchWithTimeout(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text,
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+      ...(replyToMessageId ? { reply_to_message_id: replyToMessageId } : {}),
+    }),
+  });
+  const body = await response.json().catch(() => ({}));
+
+  if (!response.ok || body.ok === false) {
+    throw new Error(body?.description || "Telegram sendMessage failed.");
   }
 
-  return text;
+  return body;
 }
 
-function parseCsv(text) {
-  const rows = [];
-  let row = [];
-  let cell = "";
-  let quote = false;
+function money(value) {
+  return `$${Math.round(Number(value || 0)).toLocaleString("en-US")}`;
+}
 
-  for (let i = 0; i < text.length; i += 1) {
-    const char = text[i];
-    const next = text[i + 1];
+function number(value) {
+  return Math.round(Number(value || 0)).toLocaleString("ru-RU");
+}
 
-    if (char === '"' && quote && next === '"') {
-      cell += '"';
-      i += 1;
-      continue;
-    }
+function revenue(row) {
+  return (
+    Number(row.sales_29 || 0) * 29 +
+    Number(row.sales_49 || 0) * 49 +
+    Number(row.sales_99 || 0) * 99 +
+    Number(row.renewals_29 || 0) * 29 +
+    Number(row.renewals_49 || 0) * 49 +
+    Number(row.renewals_99 || 0) * 99
+  );
+}
 
-    if (char === '"') {
-      quote = !quote;
-      continue;
-    }
+function sales(row) {
+  return (
+    Number(row.sales_29 || 0) +
+    Number(row.sales_49 || 0) +
+    Number(row.sales_99 || 0) +
+    Number(row.renewals_29 || 0) +
+    Number(row.renewals_49 || 0) +
+    Number(row.renewals_99 || 0)
+  );
+}
 
-    if (char === "," && !quote) {
-      row.push(cell);
-      cell = "";
-      continue;
-    }
+function formatDate(date) {
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${date}T00:00:00Z`));
+}
 
-    if ((char === "\n" || char === "\r") && !quote) {
-      if (char === "\r" && next === "\n") i += 1;
-      row.push(cell);
-      if (row.some((value) => value !== "")) rows.push(row);
-      row = [];
-      cell = "";
-      continue;
-    }
+async function getDailyEntry(date) {
+  const rows = await supabaseRequest(`daily_entries?date=eq.${date}&select=*&limit=1`);
+  return rows?.[0] || null;
+}
 
-    cell += char;
+async function getAllEntries() {
+  return supabaseRequest("daily_entries?select=*&order=date.asc");
+}
+
+function buildDailyStats(row) {
+  if (!row) return "За эту дату строки пока нет.";
+
+  const totalRevenue = revenue(row);
+  const profit = totalRevenue - Number(row.ad_spend || 0);
+  const tgGrowth = Number(row.telegram_growth ?? row.telegram_joined ?? 0);
+
+  return [
+    `<b>ЗТТ: статистика за ${formatDate(row.date)}</b>`,
+    "",
+    `Выручка: <b>${money(totalRevenue)}</b>`,
+    `Реклама: ${money(row.ad_spend)}`,
+    `Чистые: <b>${money(profit)}</b>`,
+    "",
+    `Reels: ${number(row.reels)}`,
+    `IG views: ${number(row.ig_views)}`,
+    `Instagram подписчики: ${number(row.instagram)}`,
+    "",
+    `TikTok: ${number(row.tiktoks)}`,
+    `TT views: ${number(row.tt_views)}`,
+    `TG прирост: +${number(tgGrowth)}`,
+    "",
+    `Продажи ЗТТ: <b>${number(sales(row))}</b>`,
+  ].join("\n");
+}
+
+async function getAttributionSummary() {
+  const rows = await supabaseRequest("sales_attribution?select=days_to_purchase&order=sale_date.desc");
+  const days = (rows || [])
+    .map((row) => Number(row.days_to_purchase))
+    .filter((value) => Number.isFinite(value));
+
+  if (!days.length) {
+    return {
+      salesCount: rows?.length || 0,
+      matchedSalesCount: 0,
+      average: null,
+    };
   }
-
-  row.push(cell);
-  if (row.some((value) => value !== "")) rows.push(row);
-  return rows;
-}
-
-function rowsToObjects(rows) {
-  const headers = rows[0] || [];
-  return rows.slice(1).map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index] || ""])));
-}
-
-function dayNumToDate(dayNum) {
-  const date = new Date(Date.UTC(1970, 0, 1));
-  date.setUTCDate(date.getUTCDate() + Number(dayNum));
-  return isoDate(date);
-}
-
-function tgtrackUrl(report) {
-  const url = new URL(`https://report.tgtrack.ru/pro/${report}.php`);
-  url.searchParams.set("ver", tgtrackVersion);
-  url.searchParams.set("platform", "google");
-  url.searchParams.set("apiKey", process.env.TGTRACK_API_KEY);
-  url.searchParams.set("refresh", "2");
-  return url.toString();
-}
-
-async function getTelegramActivity(date) {
-  const text = await fetchText(tgtrackUrl("join_left_by_date"));
-  const rows = rowsToObjects(parseCsv(text));
-  const totals = rows.reduce((acc, row) => {
-    if (dayNumToDate(row.dayNum) !== date) return acc;
-    acc.joined += Number(row.joinCount || 0);
-    acc.left += Number(row.leftCount || 0);
-    return acc;
-  }, { joined: 0, left: 0 });
 
   return {
-    joined: totals.joined,
-    left: totals.left,
-    growth: totals.joined - totals.left,
+    salesCount: rows.length,
+    matchedSalesCount: days.length,
+    average: Math.round((days.reduce((sum, value) => sum + value, 0) / days.length) * 10) / 10,
   };
 }
 
-async function getTelegramMembersCount() {
-  const text = await fetchText(tgtrackUrl("chatMembers"));
-  const rows = rowsToObjects(parseCsv(text));
-  return rows.filter((row) => row.status === "1").length;
-}
+async function buildAllTimeStats() {
+  const rows = await getAllEntries();
+  const summary = await getAttributionSummary().catch(() => null);
 
-async function selectExistingDailyEntry(date) {
-  const url = `${process.env.SUPABASE_URL}/rest/v1/daily_entries?date=eq.${date}&select=*`;
-  const response = await fetchWithTimeout(url, {
-    headers: {
-      apikey: process.env.SUPABASE_KEY,
-      Authorization: `Bearer ${process.env.SUPABASE_KEY}`,
-      "Content-Type": "application/json",
-    },
+  const totals = (rows || []).reduce((acc, row) => {
+    acc.revenue += revenue(row);
+    acc.adSpend += Number(row.ad_spend || 0);
+    acc.sales += sales(row);
+    acc.igViews += Number(row.ig_views || 0);
+    acc.ttViews += Number(row.tt_views || 0);
+    acc.tgGrowth += Number(row.telegram_growth ?? row.telegram_joined ?? 0);
+    acc.reels += Number(row.reels || 0);
+    acc.tiktoks += Number(row.tiktoks || 0);
+    return acc;
+  }, {
+    revenue: 0,
+    adSpend: 0,
+    sales: 0,
+    igViews: 0,
+    ttViews: 0,
+    tgGrowth: 0,
+    reels: 0,
+    tiktoks: 0,
   });
 
-  const text = await response.text();
+  const lines = [
+    "<b>ЗТТ: статистика за все время</b>",
+    "",
+    `Выручка: <b>${money(totals.revenue)}</b>`,
+    `Реклама: ${money(totals.adSpend)}`,
+    `Чистые: <b>${money(totals.revenue - totals.adSpend)}</b>`,
+    "",
+    `Reels: ${number(totals.reels)}`,
+    `TikTok: ${number(totals.tiktoks)}`,
+    `IG views: ${number(totals.igViews)}`,
+    `TT views: ${number(totals.ttViews)}`,
+    `TG прирост: +${number(totals.tgGrowth)}`,
+    "",
+    `Продажи ЗТТ: <b>${number(totals.sales)}</b>`,
+  ];
 
-  if (!response.ok) {
-    throw new Error(text || "Supabase select failed.");
+  if (summary?.average !== null && summary?.average !== undefined) {
+    lines.push("", `Среднее время до покупки: <b>${summary.average} дн.</b>`);
   }
 
-  const rows = text ? JSON.parse(text) : [];
-  return rows[0] || null;
+  return lines.join("\n");
 }
 
-async function upsertDailyEntry(date, telegram) {
-  const existing = await selectExistingDailyEntry(date);
-  const url = `${process.env.SUPABASE_URL}/rest/v1/daily_entries?on_conflict=date`;
+function parseSaleText(text) {
+  const normalized = String(text || "").trim();
+  const username = normalized.match(/@[\w\d_]{3,}/)?.[0] || "";
+  const id = normalized.match(/\b\d{5,}\b/)?.[0] || "";
+  const tariff = normalized.match(/\b(29|49|99)\b/)?.[1] || "";
+
+  const hasPurchaseWord = /(купил|купила|покупка|продажа|оплатил|оплатила|продал|залетел|зашел|зашёл)/i.test(normalized);
+  if (!hasPurchaseWord || (!username && !id)) return null;
+
+  return {
+    user: username || id,
+    tariff,
+    amount: tariff ? Number(tariff) : null,
+    sale_date: dateInYekaterinburg(),
+    raw_text: normalized,
+  };
+}
+
+function baseUrl(req) {
+  const proto = req.headers["x-forwarded-proto"] || "https";
+  const host = req.headers["x-forwarded-host"] || req.headers.host;
+  return `${proto}://${host}`;
+}
+
+async function sendSaleToAttribution(req, sale, messageId) {
+  const secret = process.env.SALES_BOT_SECRET || process.env.SYNC_SECRET;
+  if (!secret) throw new Error("SALES_BOT_SECRET or SYNC_SECRET is not configured.");
+
+  const url = new URL(`${baseUrl(req)}/api/sale-attribution`);
   const response = await fetchWithTimeout(url, {
     method: "POST",
     headers: {
-      apikey: process.env.SUPABASE_KEY,
-      Authorization: `Bearer ${process.env.SUPABASE_KEY}`,
       "Content-Type": "application/json",
-      Prefer: "resolution=merge-duplicates,return=representation",
+      "x-sales-secret": secret,
     },
     body: JSON.stringify({
-      date,
-      ad_spend: Number(existing?.ad_spend || 0),
-      leads: Number(existing?.leads || 0),
-      telegram: telegram.total,
-      telegram_joined: telegram.joined,
-      telegram_left: telegram.left,
-      telegram_growth: telegram.growth,
-      instagram: Number(existing?.instagram || 0),
-      tiktok_followers: Number(existing?.tiktok_followers || 0),
-      reels: Number(existing?.reels || 0),
-      tiktoks: Number(existing?.tiktoks || 0),
-      ig_views: Number(existing?.ig_views || 0),
-      tt_views: Number(existing?.tt_views || 0),
-      sales_29: Number(existing?.sales_29 || 0),
-      sales_49: Number(existing?.sales_49 || 0),
-      sales_99: Number(existing?.sales_99 || 0),
-      renewals_29: Number(existing?.renewals_29 || 0),
-      renewals_49: Number(existing?.renewals_49 || 0),
-      renewals_99: Number(existing?.renewals_99 || 0),
+      ...sale,
+      source_message_id: messageId ? String(messageId) : undefined,
     }),
-  });
+  }, 25000);
+  const body = await response.json().catch(() => ({}));
 
-  const text = await response.text();
-
-  if (!response.ok) {
-    throw new Error(text || "Supabase upsert failed.");
+  if (!response.ok || body.ok === false) {
+    throw new Error(body?.error || "Sale attribution failed.");
   }
 
-  return text ? JSON.parse(text) : null;
+  return body;
+}
+
+function buildSaleReply(result) {
+  const sale = result.sale || {};
+  const days = sale.days_to_purchase;
+  const username = sale.telegram_username ? `@${sale.telegram_username}` : sale.lookup_key;
+  const matchedText = result.matched ? "нашёл в базе" : "не нашёл в базе";
+  const daysText = Number.isFinite(Number(days)) ? `${days} дн.` : "не посчиталось";
+  const averageText = Number.isFinite(Number(result.averageDaysToPurchase))
+    ? `\nСреднее до покупки сейчас: <b>${result.averageDaysToPurchase} дн.</b>`
+    : "";
+
+  return [
+    `<b>Готово, продажу занёс.</b>`,
+    `${username}: ${matchedText}`,
+    `Время в TG до покупки: <b>${daysText}</b>`,
+    result.daily?.updated ? `Дневная продажа обновлена: ${result.daily.column}` : `Дневная продажа не обновлена: ${result.daily?.reason || "тариф не понял"}`,
+    averageText,
+  ].filter(Boolean).join("\n");
+}
+
+function helpMessage(chatId) {
+  return [
+    "<b>Команды ЗТТ-бота</b>",
+    "",
+    "статистика за сегодня",
+    "статистика за вчера",
+    "статистика за все время",
+    "",
+    "Продажу кидай так:",
+    "купил @username 29",
+    "купил 123456789 49",
+    "",
+    `ID этого чата: <code>${chatId}</code>`,
+  ].join("\n");
+}
+
+async function handleText(req, chatId, messageId, text) {
+  const lower = String(text || "").trim().toLowerCase().replace(/ё/g, "е");
+
+  if (!lower || lower === "/start" || lower === "/help" || lower === "помощь") {
+    return helpMessage(chatId);
+  }
+
+  if (lower === "/today" || lower.includes("статистика за сегодня")) {
+    return buildDailyStats(await getDailyEntry(dateInYekaterinburg()));
+  }
+
+  if (lower === "/yesterday" || lower.includes("статистика за вчера")) {
+    return buildDailyStats(await getDailyEntry(dateInYekaterinburg(-1)));
+  }
+
+  if (lower === "/all" || lower.includes("статистика за все время") || lower.includes("статистика за всё время")) {
+    return buildAllTimeStats();
+  }
+
+  const sale = parseSaleText(text);
+  if (sale) {
+    const result = await sendSaleToAttribution(req, sale, messageId);
+    return buildSaleReply(result);
+  }
+
+  return "Не понял сообщение. Напиши /help или кинь продажу в формате: купил @username 29";
 }
 
 export default async function handler(req, res) {
   try {
-    if (req.method !== "GET" && req.method !== "POST") {
-      return sendJson(res, 405, { ok: false, error: "Method not allowed." });
+    if (req.method !== "POST") {
+      return sendJson(res, 200, { ok: true, message: "Telegram bot endpoint is ready." });
     }
 
     checkEnv();
-    checkSecret(req);
+    checkWebhookSecret(req);
 
-    const date = getDate(req);
-    const [activity, total] = await Promise.all([
-      getTelegramActivity(date),
-      getTelegramMembersCount(),
-    ]);
-    const telegram = { date, total, ...activity };
-    const saved = await upsertDailyEntry(date, telegram);
+    const update = await readBody(req);
+    const message = update.message || update.edited_message;
+    if (!message?.chat?.id) return sendJson(res, 200, { ok: true, ignored: true });
 
-    return sendJson(res, 200, {
-      ok: true,
-      date,
-      telegram,
-      saved,
-    });
+    const chatId = String(message.chat.id);
+    const allowedChatId = process.env.TELEGRAM_ALLOWED_CHAT_ID;
+    if (allowedChatId && chatId !== String(allowedChatId)) {
+      return sendJson(res, 200, { ok: true, ignored: true, reason: "chat_not_allowed" });
+    }
+
+    const text = message.text || message.caption || "";
+    const reply = await handleText(req, chatId, message.message_id, text);
+    await sendTelegram(chatId, reply, message.message_id);
+
+    return sendJson(res, 200, { ok: true });
   } catch (error) {
-    const isAbort = error.name === "AbortError";
-    return sendJson(res, isAbort ? 504 : 500, {
+    return sendJson(res, 200, {
       ok: false,
-      error: isAbort ? "Sync request timed out." : error.message,
-      source: "sync-telegram",
+      error: error.message,
+      source: "telegram-bot",
     });
   }
 }
