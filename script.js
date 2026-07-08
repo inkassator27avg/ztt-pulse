@@ -720,7 +720,8 @@ function todayLocalDate() {
 }
 
 async function syncSource(path, date) {
-  const response = await fetch(`${path}?date=${date}&secret=${encodeURIComponent(syncSecret)}`);
+  const apiBase = window.location.protocol === "file:" ? "https://ztt-pulse.vercel.app" : "";
+  const response = await fetch(`${apiBase}${path}?date=${date}&secret=${encodeURIComponent(syncSecret)}`);
   const payload = await response.json().catch(() => ({}));
 
   if (!response.ok || payload.ok === false) {

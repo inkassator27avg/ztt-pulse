@@ -1,32 +1,18 @@
-const metaVersion = "v25.0";
-const timezone = "Asia/Yekaterinburg";
-
-const requiredEnv = ["META_ACCESS_TOKEN", "INSTAGRAM_ACCOUNT_ID", "SUPABASE_URL", "SUPABASE_KEY"];
+const requiredEnv = ["SUPABASE_URL", "SUPABASE_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"];
 
 function sendJson(res, status, response) {
   res.status(status).setHeader("content-type", "application/json; charset=utf-8");
   res.end(JSON.stringify(response, null, 2));
 }
 
-function localDate(date, timeZone = timezone) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(date);
-
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${values.year}-${values.month}-${values.day}`;
+function isoDate(date) {
+  return date.toISOString().slice(0, 10);
 }
 
 function yesterday() {
-  const now = new Date();
-  const localToday = localDate(now);
-  const [year, month, day] = localToday.split("-").map(Number);
-  const localMiddayUtc = new Date(Date.UTC(year, month - 1, day, 12));
-  localMiddayUtc.setUTCDate(localMiddayUtc.getUTCDate() - 1);
-  return localDate(localMiddayUtc);
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() - 1);
+  return isoDate(date);
 }
 
 function getDate(req) {
@@ -68,153 +54,109 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
   }
 }
 
-async function graphRequest(path, params = {}) {
-  const url = new URL(`https://graph.facebook.com/${metaVersion}/${path}`);
-  Object.entries(params).forEach(([key, value]) => {
-    url.searchParams.set(key, value);
-  });
-  url.searchParams.set("access_token", process.env.META_ACCESS_TOKEN);
+async function getEntry(date) {
+  const url = new URL(`${process.env.SUPABASE_URL}/rest/v1/daily_entries`);
+  url.searchParams.set("select", "*");
+  url.searchParams.set("date", `eq.${date}`);
+  url.searchParams.set("limit", "1");
 
-  const response = await fetchWithTimeout(url);
-  const body = await response.json();
-
-  if (!response.ok) {
-    throw new Error(body?.error?.message || "Instagram request failed.");
-  }
-
-  return body;
-}
-
-async function getInstagramProfile() {
-  return graphRequest(process.env.INSTAGRAM_ACCOUNT_ID, {
-    fields: "username,followers_count,media_count",
-  });
-}
-
-async function getRecentMedia() {
-  const result = await graphRequest(`${process.env.INSTAGRAM_ACCOUNT_ID}/media`, {
-    fields: "id,media_type,media_product_type,timestamp,permalink",
-    limit: "100",
-  });
-
-  return Array.isArray(result.data) ? result.data : [];
-}
-
-async function getMediaInsights(mediaId) {
-  const result = await graphRequest(`${mediaId}/insights`, {
-    metric: "views,reach,total_interactions,saved,shares,likes,comments",
-  });
-
-  return (result.data || []).reduce((acc, item) => {
-    acc[item.name] = Number(item.values?.[0]?.value || 0);
-    return acc;
-  }, {});
-}
-
-async function getDailyAccountViews(date) {
-  const nextDate = new Date(`${date}T12:00:00Z`);
-  nextDate.setUTCDate(nextDate.getUTCDate() + 1);
-
-  const result = await graphRequest(`${process.env.INSTAGRAM_ACCOUNT_ID}/insights`, {
-    metric: "views",
-    period: "day",
-    metric_type: "total_value",
-    since: date,
-    until: nextDate.toISOString().slice(0, 10),
-  });
-
-  const row = (result.data || []).find((item) => item.name === "views");
-  return Number(row?.total_value?.value || 0);
-}
-
-async function selectExistingDailyEntry(date) {
-  const url = `${process.env.SUPABASE_URL}/rest/v1/daily_entries?date=eq.${date}&select=*`;
   const response = await fetchWithTimeout(url, {
     headers: {
       apikey: process.env.SUPABASE_KEY,
       Authorization: `Bearer ${process.env.SUPABASE_KEY}`,
-      "Content-Type": "application/json",
     },
   });
-
   const text = await response.text();
 
   if (!response.ok) {
-    throw new Error(text || "Supabase select failed.");
+    throw new Error(text || "Supabase request failed.");
   }
 
   const rows = text ? JSON.parse(text) : [];
   return rows[0] || null;
 }
 
-async function upsertDailyEntry(date, instagram) {
-  const existing = await selectExistingDailyEntry(date);
-  const url = `${process.env.SUPABASE_URL}/rest/v1/daily_entries?on_conflict=date`;
-  const response = await fetchWithTimeout(url, {
-    method: "POST",
-    headers: {
-      apikey: process.env.SUPABASE_KEY,
-      Authorization: `Bearer ${process.env.SUPABASE_KEY}`,
-      "Content-Type": "application/json",
-      Prefer: "resolution=merge-duplicates,return=representation",
-    },
-    body: JSON.stringify({
-      date,
-      ad_spend: Number(existing?.ad_spend || 0),
-      leads: Number(existing?.leads || 0),
-      telegram: Number(existing?.telegram || 0),
-      instagram: instagram.followers,
-      tiktok_followers: Number(existing?.tiktok_followers || 0),
-      reels: instagram.reels,
-      tiktoks: Number(existing?.tiktoks || 0),
-      ig_views: instagram.views,
-      tt_views: Number(existing?.tt_views || 0),
-      sales_29: Number(existing?.sales_29 || 0),
-      sales_49: Number(existing?.sales_49 || 0),
-      sales_99: Number(existing?.sales_99 || 0),
-      renewals_29: Number(existing?.renewals_29 || 0),
-      renewals_49: Number(existing?.renewals_49 || 0),
-      renewals_99: Number(existing?.renewals_99 || 0),
-    }),
-  });
-
-  const text = await response.text();
-
-  if (!response.ok) {
-    throw new Error(text || "Supabase upsert failed.");
-  }
-
-  return text ? JSON.parse(text) : null;
+function money(value) {
+  return `$${Math.round(Number(value || 0)).toLocaleString("en-US")}`;
 }
 
-async function getInstagramStats(date) {
-  const profile = await getInstagramProfile();
-  const media = await getRecentMedia();
-  const dailyViews = await getDailyAccountViews(date);
-  const reels = media.filter((item) => (
-    item.media_product_type === "REELS" &&
-    localDate(new Date(item.timestamp)) === date
-  ));
+function number(value) {
+  return Math.round(Number(value || 0)).toLocaleString("ru-RU");
+}
 
-  const insightRows = await Promise.all(reels.map(async (item) => ({
-    id: item.id,
-    permalink: item.permalink,
-    timestamp: item.timestamp,
-    insights: await getMediaInsights(item.id),
-  })));
+function revenue(row) {
+  return (
+    Number(row.sales_29 || 0) * 29 +
+    Number(row.sales_49 || 0) * 49 +
+    Number(row.sales_99 || 0) * 99 +
+    Number(row.renewals_29 || 0) * 29 +
+    Number(row.renewals_49 || 0) * 49 +
+    Number(row.renewals_99 || 0) * 99
+  );
+}
 
-  return {
-    date,
-    username: profile.username,
-    followers: Number(profile.followers_count || 0),
-    mediaCount: Number(profile.media_count || 0),
-    reels: reels.length,
-    views: dailyViews,
-    viewsSource: "account_daily_total",
-    reach: insightRows.reduce((sum, item) => sum + Number(item.insights.reach || 0), 0),
-    interactions: insightRows.reduce((sum, item) => sum + Number(item.insights.total_interactions || 0), 0),
-    media: insightRows,
-  };
+function sales(row) {
+  return (
+    Number(row.sales_29 || 0) +
+    Number(row.sales_49 || 0) +
+    Number(row.sales_99 || 0) +
+    Number(row.renewals_29 || 0) +
+    Number(row.renewals_49 || 0) +
+    Number(row.renewals_99 || 0)
+  );
+}
+
+function formatDate(date) {
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${date}T00:00:00Z`));
+}
+
+function buildMessage(row) {
+  const totalRevenue = revenue(row);
+  const profit = totalRevenue - Number(row.ad_spend || 0);
+  const tgGrowth = row.telegram_growth ?? row.telegram_joined ?? 0;
+
+  return [
+    `ЗТТ: статистика за ${formatDate(row.date)}`,
+    "",
+    `Выручка: ${money(totalRevenue)}`,
+    `Реклама: ${money(row.ad_spend)}`,
+    `Чистые: ${money(profit)}`,
+    "",
+    `Reels: ${number(row.reels)}`,
+    `IG views: ${number(row.ig_views)}`,
+    `Instagram подписчики: ${number(row.instagram)}`,
+    "",
+    `TikTok: ${number(row.tiktoks)}`,
+    `TT views: ${number(row.tt_views)}`,
+    `TG прирост: +${number(tgGrowth)}`,
+    "",
+    `Продажи ЗТТ: ${number(sales(row))}`,
+  ].join("\n");
+}
+
+async function sendTelegram(message) {
+  const url = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
+  const response = await fetchWithTimeout(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: process.env.TELEGRAM_CHAT_ID,
+      text: message,
+      disable_web_page_preview: true,
+    }),
+  });
+  const body = await response.json().catch(() => ({}));
+
+  if (!response.ok || body.ok === false) {
+    throw new Error(body?.description || "Telegram request failed.");
+  }
+
+  return body;
 }
 
 export default async function handler(req, res) {
@@ -227,21 +169,27 @@ export default async function handler(req, res) {
     checkSecret(req);
 
     const date = getDate(req);
-    const instagram = await getInstagramStats(date);
-    const saved = await upsertDailyEntry(date, instagram);
+    const row = await getEntry(date);
+    if (!row) {
+      return sendJson(res, 404, { ok: false, error: `No daily entry for ${date}.` });
+    }
+
+    const message = buildMessage(row);
+    const telegram = await sendTelegram(message);
 
     return sendJson(res, 200, {
       ok: true,
       date,
-      instagramAccountId: process.env.INSTAGRAM_ACCOUNT_ID,
-      instagram,
-      saved,
+      sent: true,
+      message,
+      telegramMessageId: telegram?.result?.message_id,
     });
   } catch (error) {
     const isAbort = error.name === "AbortError";
     return sendJson(res, isAbort ? 504 : 500, {
       ok: false,
-      error: isAbort ? "Sync request timed out." : error.message,
+      error: isAbort ? "Daily report request timed out." : error.message,
+      source: "send-daily-report",
     });
   }
 }
