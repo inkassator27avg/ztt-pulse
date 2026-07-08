@@ -1,4 +1,4 @@
-const requiredEnv = ["SUPABASE_URL", "SUPABASE_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"];
+const requiredEnv = ["SUPABASE_URL", "SUPABASE_KEY", "TELEGRAM_BOT_TOKEN"];
 
 function sendJson(res, status, response) {
   res.status(status).setHeader("content-type", "application/json; charset=utf-8");
@@ -29,6 +29,10 @@ function checkEnv() {
   if (missing.length) {
     throw new Error(`Missing env vars: ${missing.join(", ")}`);
   }
+}
+
+function getReportChatId() {
+  return process.env.TELEGRAM_CHAT_ID || process.env.TELEGRAM_ALLOWED_CHAT_ID || "";
 }
 
 function checkSecret(req) {
@@ -140,12 +144,17 @@ function buildMessage(row) {
 }
 
 async function sendTelegram(message) {
+  const chatId = getReportChatId();
+  if (!chatId) {
+    throw new Error("TELEGRAM_CHAT_ID or TELEGRAM_ALLOWED_CHAT_ID is not configured.");
+  }
+
   const url = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
   const response = await fetchWithTimeout(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      chat_id: process.env.TELEGRAM_CHAT_ID,
+      chat_id: chatId,
       text: message,
       disable_web_page_preview: true,
     }),
