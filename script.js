@@ -735,23 +735,31 @@ async function refreshTodayStats() {
   if (!refreshStatsButton) return;
 
   const date = todayLocalDate();
+
   refreshStatsButton.disabled = true;
   refreshStatsButton.textContent = "Обновляю...";
-  if (refreshStatus) refreshStatus.textContent = "Meta, Instagram, Telegram";
+  if (refreshStatus) refreshStatus.textContent = `Meta, Instagram, Telegram за ${formatDate(date)}`;
 
   try {
-    await syncSource("/api/sync-meta", date);
-    if (refreshStatus) refreshStatus.textContent = "Instagram...";
-    await syncSource("/api/sync-instagram", date);
-    if (refreshStatus) refreshStatus.textContent = "Telegram...";
-    await syncSource("/api/sync-telegram", date);
+    const result = await syncSource("/api/refresh-stats", date);
     await loadEntriesFromSupabase();
     render();
+
+    if (result.complete === false) {
+      const failed = (result.results || [])
+        .filter((source) => !source.ok)
+        .map((source) => `${source.name}: ${source.error}`);
+      const okCount = (result.results || []).filter((source) => source.ok).length;
+      const totalCount = (result.results || []).length || 3;
+
+      if (refreshStatus) refreshStatus.textContent = `Частично: ${okCount}/${totalCount}. ${failed.join(" · ")}`;
+      return;
+    }
+
     if (refreshStatus) refreshStatus.textContent = "Готово";
   } catch (error) {
-    console.warn("Manual stats refresh failed.", error);
-    if (refreshStatus) refreshStatus.textContent = "Ошибка обновления";
-    alert(`Не получилось обновить статистику: ${error.message}`);
+    console.warn("Manual stats reload failed.", error);
+    if (refreshStatus) refreshStatus.textContent = `Не обновилось: ${error.message}`;
   } finally {
     refreshStatsButton.disabled = false;
     refreshStatsButton.textContent = "Обновить статистику";

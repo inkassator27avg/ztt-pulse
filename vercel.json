@@ -2,20 +2,12 @@
   "cleanUrls": true,
   "crons": [
     {
-      "path": "/api/sync-meta",
-      "schedule": "0 3 * * *"
-    },
-    {
-      "path": "/api/sync-instagram",
-      "schedule": "10 3 * * *"
-    },
-    {
-      "path": "/api/sync-telegram",
-      "schedule": "20 3 * * *"
+      "path": "/api/refresh-stats",
+      "schedule": "30 3 * * *"
     },
     {
       "path": "/api/send-daily-report",
-      "schedule": "35 3 * * *"
+      "schedule": "45 3 * * *"
     }
   ],
   "headers": [
