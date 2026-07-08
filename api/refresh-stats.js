@@ -131,7 +131,10 @@ export default async function handler(req, res) {
       { name: "Telegram", path: "/api/sync-telegram" },
     ];
 
-    const results = await Promise.all(sources.map((source) => runSource(req, source, date)));
+    const results = [];
+    for (const source of sources) {
+      results.push(await runSource(req, source, date));
+    }
 
     const failed = results.filter((result) => !result.ok);
 
