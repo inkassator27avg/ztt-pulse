@@ -1,7 +1,6 @@
-const metaVersion = "v25.0";
-const instagramAccountId = "17841461871497307";
+const tgtrackVersion = "2.20";
 
-const requiredEnv = ["META_ACCESS_TOKEN", "SUPABASE_URL", "SUPABASE_KEY"];
+const requiredEnv = ["TGTRACK_API_KEY", "SUPABASE_URL", "SUPABASE_KEY"];
 
 function sendJson(res, status, response) {
   res.statusCode = status;
@@ -11,12 +10,6 @@ function sendJson(res, status, response) {
 
 function isoDate(date) {
   return date.toISOString().slice(0, 10);
-}
-
-function nextDate(dateString) {
-  const date = new Date(`${dateString}T12:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + 1);
-  return isoDate(date);
 }
 
 function yesterday() {
@@ -53,7 +46,7 @@ function checkSecret(req) {
   }
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -64,60 +57,104 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
   }
 }
 
-async function graphRequest(path, params = {}) {
-  const url = new URL(`https://graph.facebook.com/${metaVersion}/${path}`);
-  Object.entries(params).forEach(([key, value]) => {
-    url.searchParams.set(key, String(value));
+async function fetchText(url) {
+  const response = await fetchWithTimeout(url, {
+    headers: { "User-Agent": "Mozilla/5.0" },
   });
-  url.searchParams.set("access_token", process.env.META_ACCESS_TOKEN);
-
-  const response = await fetchWithTimeout(url);
-  const body = await response.json();
+  const text = await response.text();
 
   if (!response.ok) {
-    throw new Error(body?.error?.message || "Instagram request failed.");
+    throw new Error(text || `TgTrack request failed: ${response.status}`);
   }
 
-  return body;
+  return text;
 }
 
-function localDay(timestamp) {
-  const date = new Date(timestamp);
-  const formatter = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Yekaterinburg",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  return formatter.format(date);
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let quote = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    const next = text[i + 1];
+
+    if (char === '"' && quote && next === '"') {
+      cell += '"';
+      i += 1;
+      continue;
+    }
+
+    if (char === '"') {
+      quote = !quote;
+      continue;
+    }
+
+    if (char === "," && !quote) {
+      row.push(cell);
+      cell = "";
+      continue;
+    }
+
+    if ((char === "\n" || char === "\r") && !quote) {
+      if (char === "\r" && next === "\n") i += 1;
+      row.push(cell);
+      if (row.some((value) => value !== "")) rows.push(row);
+      row = [];
+      cell = "";
+      continue;
+    }
+
+    cell += char;
+  }
+
+  row.push(cell);
+  if (row.some((value) => value !== "")) rows.push(row);
+  return rows;
 }
 
-async function getInstagramProfile() {
-  return graphRequest(instagramAccountId, {
-    fields: "username,followers_count,media_count",
-  });
+function rowsToObjects(rows) {
+  const headers = rows[0] || [];
+  return rows.slice(1).map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index] || ""])));
 }
 
-async function getRecentMedia() {
-  const result = await graphRequest(`${instagramAccountId}/media`, {
-    fields: "id,media_product_type,timestamp,permalink",
-    limit: "100",
-  });
-
-  return Array.isArray(result.data) ? result.data : [];
+function dayNumToDate(dayNum) {
+  const date = new Date(Date.UTC(1970, 0, 1));
+  date.setUTCDate(date.getUTCDate() + Number(dayNum));
+  return isoDate(date);
 }
 
-async function getDailyAccountViews(date) {
-  const result = await graphRequest(`${instagramAccountId}/insights`, {
-    metric: "views",
-    period: "day",
-    metric_type: "total_value",
-    since: date,
-    until: nextDate(date),
-  });
+function tgtrackUrl(report) {
+  const url = new URL(`https://report.tgtrack.ru/pro/${report}.php`);
+  url.searchParams.set("ver", tgtrackVersion);
+  url.searchParams.set("platform", "google");
+  url.searchParams.set("apiKey", process.env.TGTRACK_API_KEY);
+  url.searchParams.set("refresh", "2");
+  return url.toString();
+}
 
-  const row = (result.data || []).find((item) => item.name === "views");
-  return Number(row?.total_value?.value || 0);
+async function getTelegramActivity(date) {
+  const text = await fetchText(tgtrackUrl("join_left_by_date"));
+  const rows = rowsToObjects(parseCsv(text));
+  const totals = rows.reduce((acc, row) => {
+    if (dayNumToDate(row.dayNum) !== date) return acc;
+    acc.joined += Number(row.joinCount || 0);
+    acc.left += Number(row.leftCount || 0);
+    return acc;
+  }, { joined: 0, left: 0 });
+
+  return {
+    joined: totals.joined,
+    left: totals.left,
+    growth: totals.joined - totals.left,
+  };
+}
+
+async function getTelegramMembersCount() {
+  const text = await fetchText(tgtrackUrl("chatMembers"));
+  const rows = rowsToObjects(parseCsv(text));
+  return rows.filter((row) => row.status === "1").length;
 }
 
 async function selectExistingDailyEntry(date) {
@@ -140,7 +177,7 @@ async function selectExistingDailyEntry(date) {
   return rows[0] || null;
 }
 
-async function upsertDailyEntry(date, instagram) {
+async function upsertDailyEntry(date, telegram) {
   const existing = await selectExistingDailyEntry(date);
   const url = `${process.env.SUPABASE_URL}/rest/v1/daily_entries?on_conflict=date`;
   const response = await fetchWithTimeout(url, {
@@ -155,12 +192,15 @@ async function upsertDailyEntry(date, instagram) {
       date,
       ad_spend: Number(existing?.ad_spend || 0),
       leads: Number(existing?.leads || 0),
-      telegram: Number(existing?.telegram || 0),
-      instagram: instagram.followers,
+      telegram: telegram.total,
+      telegram_joined: telegram.joined,
+      telegram_left: telegram.left,
+      telegram_growth: telegram.growth,
+      instagram: Number(existing?.instagram || 0),
       tiktok_followers: Number(existing?.tiktok_followers || 0),
-      reels: instagram.reels,
+      reels: Number(existing?.reels || 0),
       tiktoks: Number(existing?.tiktoks || 0),
-      ig_views: instagram.views,
+      ig_views: Number(existing?.ig_views || 0),
       tt_views: Number(existing?.tt_views || 0),
       sales_29: Number(existing?.sales_29 || 0),
       sales_49: Number(existing?.sales_49 || 0),
@@ -180,28 +220,6 @@ async function upsertDailyEntry(date, instagram) {
   return text ? JSON.parse(text) : null;
 }
 
-async function getInstagramStats(date) {
-  const profile = await getInstagramProfile();
-  const media = await getRecentMedia();
-  const views = await getDailyAccountViews(date);
-  const reels = media.filter((item) => item.media_product_type === "REELS" && localDay(item.timestamp) === date);
-
-  return {
-    date,
-    username: profile.username,
-    followers: Number(profile.followers_count || 0),
-    mediaCount: Number(profile.media_count || 0),
-    reels: reels.length,
-    views,
-    viewsSource: "account_daily_total",
-    media: reels.map((item) => ({
-      id: item.id,
-      permalink: item.permalink,
-      timestamp: item.timestamp,
-    })),
-  };
-}
-
 export default async function handler(req, res) {
   try {
     if (req.method !== "GET" && req.method !== "POST") {
@@ -212,14 +230,17 @@ export default async function handler(req, res) {
     checkSecret(req);
 
     const date = getDate(req);
-    const instagram = await getInstagramStats(date);
-    const saved = await upsertDailyEntry(date, instagram);
+    const [activity, total] = await Promise.all([
+      getTelegramActivity(date),
+      getTelegramMembersCount(),
+    ]);
+    const telegram = { date, total, ...activity };
+    const saved = await upsertDailyEntry(date, telegram);
 
     return sendJson(res, 200, {
       ok: true,
       date,
-      instagramAccountId,
-      instagram,
+      telegram,
       saved,
     });
   } catch (error) {
@@ -227,7 +248,7 @@ export default async function handler(req, res) {
     return sendJson(res, isAbort ? 504 : 500, {
       ok: false,
       error: isAbort ? "Sync request timed out." : error.message,
-      source: "sync-instagram",
+      source: "sync-telegram",
     });
   }
 }

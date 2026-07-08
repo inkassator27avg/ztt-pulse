@@ -220,6 +220,41 @@ h1 {
   min-width: 0;
 }
 
+.sync-control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  width: 100%;
+}
+
+.sync-button {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid rgba(139, 92, 246, 0.7);
+  border-radius: 6px;
+  background: rgba(139, 92, 246, 0.16);
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.sync-button:hover {
+  background: rgba(139, 92, 246, 0.28);
+}
+
+.sync-button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.sync-status {
+  min-height: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .custom-range {
   display: flex;
   gap: 8px;
@@ -887,6 +922,21 @@ td {
   .period-control {
     width: 100%;
     justify-items: stretch;
+  }
+
+  .sync-control {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .sync-button {
+    width: 100%;
+  }
+
+  .sync-status {
+    min-height: 16px;
+    white-space: normal;
   }
 
   .range-tabs {
