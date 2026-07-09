@@ -141,6 +141,177 @@ function getOpenAiKey() {
   );
 }
 
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let quote = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    const next = text[i + 1];
+
+    if (char === '"' && quote && next === '"') {
+      cell += '"';
+      i += 1;
+      continue;
+    }
+
+    if (char === '"') {
+      quote = !quote;
+      continue;
+    }
+
+    if (char === "," && !quote) {
+      row.push(cell);
+      cell = "";
+      continue;
+    }
+
+    if ((char === "\n" || char === "\r") && !quote) {
+      if (char === "\r" && next === "\n") i += 1;
+      row.push(cell);
+      if (row.some((value) => value !== "")) rows.push(row);
+      row = [];
+      cell = "";
+      continue;
+    }
+
+    cell += char;
+  }
+
+  row.push(cell);
+  if (row.some((value) => value !== "")) rows.push(row);
+  return rows;
+}
+
+function rowsToObjects(rows) {
+  const headers = rows[0] || [];
+  return rows.slice(1).map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index] || ""])));
+}
+
+function cleanHeader(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[@_\-\s./\\:;()[\]{}]+/g, "");
+}
+
+function valueByAliases(row, aliases) {
+  const normalized = Object.fromEntries(Object.entries(row).map(([key, value]) => [cleanHeader(key), value]));
+  for (const alias of aliases) {
+    const value = normalized[cleanHeader(alias)];
+    if (value !== undefined && String(value).trim() !== "") return String(value).trim();
+  }
+  return "";
+}
+
+function normalizeUsername(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^https?:\/\/t\.me\//i, "")
+    .replace(/^@/, "")
+    .toLowerCase();
+}
+
+function normalizeId(value) {
+  return String(value || "").replace(/[^\d]/g, "");
+}
+
+function parseDateValue(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+
+  const ru = raw.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/);
+  if (ru) {
+    const day = ru[1].padStart(2, "0");
+    const month = ru[2].padStart(2, "0");
+    const year = ru[3].length === 2 ? `20${ru[3]}` : ru[3];
+    return `${year}-${month}-${day}`;
+  }
+
+  const serial = Number(raw.replace(",", "."));
+  if (Number.isFinite(serial) && serial > 20000 && serial < 80000) {
+    const date = new Date(Date.UTC(1899, 11, 30));
+    date.setUTCDate(date.getUTCDate() + serial);
+    return date.toISOString().slice(0, 10);
+  }
+
+  const date = new Date(raw);
+  if (!Number.isNaN(date.getTime())) return date.toISOString().slice(0, 10);
+  return null;
+}
+
+function diffDays(fromDate, toDate) {
+  const from = new Date(`${fromDate}T00:00:00Z`);
+  const to = new Date(`${toDate}T00:00:00Z`);
+  const days = Math.floor((to - from) / 86400000);
+  return Number.isFinite(days) ? Math.max(days, 0) : null;
+}
+
+function membersCsvUrl() {
+  if (process.env.TG_MEMBERS_CSV_URL) return process.env.TG_MEMBERS_CSV_URL;
+  if (!process.env.TG_MEMBERS_SHEET_ID) return "";
+  const gid = process.env.TG_MEMBERS_SHEET_GID || "0";
+  return `https://docs.google.com/spreadsheets/d/${process.env.TG_MEMBERS_SHEET_ID}/export?format=csv&gid=${gid}`;
+}
+
+async function loadTelegramMembers() {
+  const url = membersCsvUrl();
+  if (!url) return [];
+
+  const response = await fetchWithTimeout(url, {}, 20000);
+  const text = await response.text();
+  if (!response.ok) throw new Error(text || "Telegram members sheet request failed.");
+  return rowsToObjects(parseCsv(text));
+}
+
+function telegramMemberInfo(row) {
+  const userId = normalizeId(valueByAliases(row, [
+    "telegram_user_id", "telegram id", "tg id", "user id", "userid", "id", "айди", "тг айди",
+  ]));
+  const username = normalizeUsername(valueByAliases(row, [
+    "username", "telegram_username", "telegram username", "user", "tag", "тег", "юзер", "ник",
+  ]));
+  const joinedRaw = valueByAliases(row, [
+    "joined_at", "join_date", "joined date", "date joined", "subscribed_at", "subscription date",
+    "дата подписки", "дата входа", "дата вступления", "подписался", "добавлен", "date",
+  ]);
+  const daysRaw = valueByAliases(row, [
+    "days", "days_in_channel", "days subscribed", "days in tg", "сколько дней", "дней в канале",
+    "сколько находится", "дней подписан", "время в канале",
+  ]);
+
+  return {
+    userId,
+    username,
+    joinedAt: parseDateValue(joinedRaw),
+    daysInChannel: Number(String(daysRaw).replace(",", ".")),
+  };
+}
+
+function extractTelegramLookups(text) {
+  const source = String(text || "");
+  const values = new Set();
+  for (const match of source.matchAll(/@[\w\d_]{3,}/g)) values.add(match[0]);
+  for (const match of source.matchAll(/\b\d{5,}\b/g)) values.add(match[0]);
+  return [...values].slice(0, 12);
+}
+
+function findTelegramMember(rows, lookup) {
+  const targetId = normalizeId(lookup);
+  const targetUsername = normalizeUsername(lookup);
+
+  for (const row of rows) {
+    const info = telegramMemberInfo(row);
+    if (targetId && info.userId && targetId === info.userId) return { row, info };
+    if (targetUsername && info.username && targetUsername === info.username) return { row, info };
+  }
+
+  return null;
+}
+
 function money(value) {
   return `$${Math.round(Number(value || 0)).toLocaleString("en-US")}`;
 }
@@ -267,6 +438,81 @@ async function getAttributionSummary() {
   };
 }
 
+async function getRecentAttribution(limit = 30) {
+  return supabaseRequest(
+    `sales_attribution?select=sale_date,lookup_key,telegram_user_id,telegram_username,tariff,amount,joined_at,days_to_purchase,created_at&order=sale_date.desc,created_at.desc&limit=${limit}`
+  );
+}
+
+function formatAttributionRow(row) {
+  const user = row.telegram_username
+    ? `@${row.telegram_username}`
+    : (row.telegram_user_id || row.lookup_key || "unknown");
+  const amount = row.amount ? `, amount ${money(row.amount)}` : "";
+  const joined = row.joined_at ? `, joined_at ${row.joined_at}` : "";
+  const days = row.days_to_purchase !== null && row.days_to_purchase !== undefined
+    ? `, days_to_purchase ${row.days_to_purchase}`
+    : ", days_to_purchase unknown";
+  return `${row.sale_date}: ${user}, tariff ${row.tariff || "unknown"}${amount}${joined}${days}`;
+}
+
+async function buildTelegramAccessContext(messageText) {
+  const lines = [
+    "TG-track and sales attribution access:",
+    "You can use this context to answer about buyer join dates and days from Telegram subscription to purchase.",
+  ];
+  const lookups = extractTelegramLookups(messageText);
+
+  const recentSales = await getRecentAttribution(30).catch((error) => {
+    lines.push(`Recent sales attribution unavailable: ${error.message}`);
+    return [];
+  });
+
+  if (recentSales?.length) {
+    lines.push("Recent attributed sales:");
+    lines.push(...recentSales.slice(0, 20).map(formatAttributionRow));
+  } else {
+    lines.push("Recent attributed sales: none.");
+  }
+
+  if (!membersCsvUrl()) {
+    lines.push("TG members sheet is not configured in env, so exact TG-track lookup is unavailable.");
+    return lines.join("\n");
+  }
+
+  if (!lookups.length) {
+    lines.push("No @username or Telegram numeric ID found in the user message. If exact buyer lookup is needed, ask Daniil for @username or TG ID.");
+    return lines.join("\n");
+  }
+
+  const members = await loadTelegramMembers().catch((error) => {
+    lines.push(`TG members sheet unavailable: ${error.message}`);
+    return [];
+  });
+
+  lines.push(`TG members loaded: ${members.length}.`);
+  lines.push("Exact TG-track matches from this message:");
+
+  for (const lookup of lookups) {
+    const match = findTelegramMember(members, lookup);
+    if (!match) {
+      lines.push(`${lookup}: not found in TG-track members sheet.`);
+      continue;
+    }
+
+    const info = match.info;
+    const daysNow = info.joinedAt
+      ? diffDays(info.joinedAt, dateInYekaterinburg())
+      : (Number.isFinite(info.daysInChannel) ? Math.max(Math.round(info.daysInChannel), 0) : null);
+
+    lines.push(
+      `${lookup}: found, username=${info.username || ""}, id=${info.userId || ""}, joined_at=${info.joinedAt || "unknown"}, days_in_channel_now=${daysNow ?? "unknown"}.`
+    );
+  }
+
+  return lines.join("\n");
+}
+
 async function buildAllTimeStats() {
   const rows = await getAllEntries();
   const summary = await getAttributionSummary().catch(() => null);
@@ -386,6 +632,7 @@ function helpMessage(chatId) {
 
 function karinaInstructions() {
   return [
+    "Important data access: you receive server context from the ZTT dashboard, sales_attribution table, and TG-track lookup. If Daniil sends @username or Telegram ID, use exact TG-track match, joined_at, and days_in_channel. If there is no user identifier, do not guess; ask for @username or Telegram ID.",
     "Ты Карина — Telegram-ассистент Даниила по проекту ЗТТ.",
     "ЗТТ — закрытая тусовка трафагонов, подписочный продукт.",
     "Отвечай по-русски, на ты, коротко и по делу.",
@@ -397,7 +644,7 @@ function karinaInstructions() {
   ].join("\n");
 }
 
-async function buildAssistantContext() {
+async function buildAssistantContext(messageText = "") {
   const rows = await getEntries(30, "desc").catch(() => []);
   const latest = rows?.[0] || null;
   const yesterday = await getDailyEntry(dateInYekaterinburg(-1)).catch(() => null);
@@ -443,7 +690,10 @@ async function askKarina(text) {
     ].join("\n");
   }
 
-  const context = await buildAssistantContext();
+  const context = [
+    await buildAssistantContext(text),
+    await buildTelegramAccessContext(text).catch((error) => `TG-track context unavailable: ${error.message}`),
+  ].join("\n\n");
   const response = await fetchWithTimeout("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -515,6 +765,7 @@ export default async function handler(req, res) {
           ? {
               telegramConfigured: Boolean(process.env.TELEGRAM_BOT_TOKEN),
               openAiConfigured: Boolean(getOpenAiKey()),
+              tgMembersConfigured: Boolean(membersCsvUrl()),
               model: process.env.OPENAI_MODEL || defaultOpenAiModel,
             }
           : {}),
