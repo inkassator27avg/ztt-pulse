@@ -121,7 +121,7 @@ async function getAdCreatives(adIds) {
     body.set("access_token", process.env.META_ACCESS_TOKEN);
     body.set("batch", JSON.stringify(group.map((adId) => ({
       method: "GET",
-      relative_url: `${adId}?fields=creative%7Bobject_story_spec%7D`,
+      relative_url: `${adId}?fields=creative%7Bid,name,actor_id,object_id,instagram_actor_id,object_story_spec,effective_object_story_id,instagram_permalink_url%7D`,
     }))));
 
     const batch = await fetchMetaJson(`https://graph.facebook.com/${metaVersion}/`, {
@@ -156,7 +156,10 @@ function hasIdentityValue(value, keyNames, targetId) {
 
   return Object.entries(value).some(([key, nestedValue]) => {
     const cleanKey = key.toLowerCase();
-    if (keyNames.has(cleanKey) && normalizeId(nestedValue) === targetId) return true;
+    if (keyNames.has(cleanKey)) {
+      const rawValue = String(nestedValue || "");
+      if (normalizeId(rawValue) === targetId || rawValue.includes(targetId)) return true;
+    }
     return hasIdentityValue(nestedValue, keyNames, targetId);
   });
 }
@@ -164,12 +167,12 @@ function hasIdentityValue(value, keyNames, targetId) {
 function creativeMatchesTarget(creative, target) {
   if (!creative) return false;
 
-  const pageKeys = new Set(["page_id"]);
-  const instagramKeys = new Set(["instagram_actor_id", "instagram_user_id", "instagram_id", "ig_user_id"]);
+  const pageKeys = new Set(["page_id", "actor_id", "object_id"]);
+  const instagramKeys = new Set(["instagram_actor_id", "instagram_user_id", "instagram_id", "ig_user_id", "instagram_business_account_id"]);
 
   return (
-    hasIdentityValue(creative.object_story_spec || creative, pageKeys, target.pageId) ||
-    hasIdentityValue(creative.object_story_spec || creative, instagramKeys, target.instagramAccountId)
+    hasIdentityValue(creative, pageKeys, target.pageId) ||
+    hasIdentityValue(creative, instagramKeys, target.instagramAccountId)
   );
 }
 
