@@ -161,11 +161,18 @@ async function getTelegramMembersCount() {
   const payload = await response.json().catch(() => ({}));
   const count = Number(payload?.result);
 
-  if (!response.ok || payload?.ok !== true || !Number.isInteger(count) || count < 0) {
-    throw new Error("Telegram member count is unavailable for the public channel.");
+  if (response.ok && payload?.ok === true && Number.isInteger(count) && count >= 0) {
+    return { count, source: "telegram_bot_api" };
   }
 
-  return count;
+  const publicUrl = `https://t.me/${publicChannel.replace(/^@/, "")}`;
+  const html = await fetchText(publicUrl);
+  const match = html.match(/<div class="tgme_page_extra">\s*([^<]+subscriber[^<]*)<\/div>/i);
+  const publicCount = Number(String(match?.[1] || "").replace(/\D/g, ""));
+  if (!Number.isInteger(publicCount) || publicCount < 1) {
+    throw new Error("Telegram member count is unavailable for the public channel.");
+  }
+  return { count: publicCount, source: "telegram_public_page" };
 }
 
 async function selectExistingDailyEntry(date) {
@@ -241,11 +248,11 @@ export default async function handler(req, res) {
     checkSecret(req);
 
     const date = getDate(req);
-    const [activity, total] = await Promise.all([
+    const [activity, members] = await Promise.all([
       getTelegramActivity(date),
       getTelegramMembersCount(),
     ]);
-    const telegram = { date, total, ...activity, totalSource: "telegram_bot_api", channel: publicChannel };
+    const telegram = { date, total: members.count, ...activity, totalSource: members.source, channel: publicChannel };
     const saved = await upsertDailyEntry(date, telegram);
 
     return sendJson(res, 200, {
