@@ -7,9 +7,9 @@ function isoDate(date) {
   return date.toISOString().slice(0, 10);
 }
 
-function todayYekaterinburg() {
+function todayAlmaty() {
   const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Yekaterinburg",
+    timeZone: "Asia/Almaty",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -19,11 +19,11 @@ function todayYekaterinburg() {
   return `${values.year}-${values.month}-${values.day}`;
 }
 
-function yesterdayYekaterinburg() {
+function yesterdayAlmaty() {
   const date = new Date();
   date.setDate(date.getDate() - 1);
   const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Yekaterinburg",
+    timeZone: "Asia/Almaty",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -35,7 +35,7 @@ function yesterdayYekaterinburg() {
 
 function getDate(req) {
   const value = Array.isArray(req.query?.date) ? req.query.date[0] : req.query?.date;
-  if (!value) return req.headers["x-vercel-cron"] ? yesterdayYekaterinburg() : todayYekaterinburg();
+  if (!value) return req.headers["x-vercel-cron"] ? yesterdayAlmaty() : todayAlmaty();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     throw new Error("Date must be YYYY-MM-DD.");
   }

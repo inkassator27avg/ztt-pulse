@@ -25,6 +25,17 @@ function yesterday() {
   return isoDate(date);
 }
 
+function todayAlmaty() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Almaty",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
 function getDate(req) {
   const value = Array.isArray(req.query?.date) ? req.query.date[0] : req.query?.date;
   if (!value) return yesterday();
@@ -86,7 +97,7 @@ async function graphRequest(path, params = {}) {
 function localDay(timestamp) {
   const date = new Date(timestamp);
   const formatter = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Yekaterinburg",
+    timeZone: "Asia/Almaty",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -110,6 +121,10 @@ async function getRecentMedia() {
 }
 
 async function getDailyAccountViews(date) {
+  // Instagram Insights rejects a range whose `until` is in the future. For
+  // the open business day we still sync followers and the reel catalog, but
+  // keep views explicitly unknown until the next completed-day refresh.
+  if (date >= todayAlmaty()) return null;
   const result = await graphRequest(`${instagramAccountId}/insights`, {
     metric: "views",
     period: "day",
@@ -162,7 +177,7 @@ async function upsertDailyEntry(date, instagram) {
       tiktok_followers: Number(existing?.tiktok_followers || 0),
       reels: instagram.reels,
       tiktoks: Number(existing?.tiktoks || 0),
-      ig_views: instagram.views,
+      ig_views: Number.isFinite(instagram.views) ? instagram.views : Number(existing?.ig_views || 0),
       tt_views: Number(existing?.tt_views || 0),
       sales_29: Number(existing?.sales_29 || 0),
       sales_49: Number(existing?.sales_49 || 0),
@@ -195,7 +210,7 @@ async function getInstagramStats(date) {
     mediaCount: Number(profile.media_count || 0),
     reels: reels.length,
     views,
-    viewsSource: "account_daily_total",
+    viewsSource: Number.isFinite(views) ? "account_daily_total" : "pending_complete_day",
     media: reels.map((item) => ({
       id: item.id,
       permalink: item.permalink,

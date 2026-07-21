@@ -15,7 +15,6 @@ const supabaseConfig = {
 
 const dashboardPassword = "inka27avg!";
 const authStorageKey = "ztt-pulse-unlocked-v2";
-const syncSecret = "ztt-meta-sync-2026";
 
 let selectedRange = "7";
 let entries = normalizeEntries(loadEntries());
@@ -806,15 +805,7 @@ function todayLocalDate() {
 }
 
 async function syncSource(path, date) {
-  const apiBase = window.location.protocol === "file:" ? "https://ztt-pulse.vercel.app" : "";
-  const response = await fetch(`${apiBase}${path}?date=${date}&secret=${encodeURIComponent(syncSecret)}`);
-  const payload = await response.json().catch(() => ({}));
-
-  if (!response.ok || payload.ok === false) {
-    throw new Error(payload.error || `Sync failed: ${path}`);
-  }
-
-  return payload;
+  throw new Error("Manual sync moved to the private cash.ztt.kz dashboard.");
 }
 
 async function refreshTodayStats() {
