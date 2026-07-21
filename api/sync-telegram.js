@@ -1,6 +1,7 @@
 const tgtrackVersion = "2.20";
 
-const requiredEnv = ["TGTRACK_API_KEY", "SUPABASE_URL", "SUPABASE_KEY"];
+const requiredEnv = ["TGTRACK_API_KEY", "SUPABASE_URL", "SUPABASE_KEY", "TELEGRAM_BOT_TOKEN"];
+const publicChannel = process.env.TELEGRAM_PUBLIC_CHANNEL || "@danyaromanov1";
 
 function sendJson(res, status, response) {
   res.statusCode = status;
@@ -154,9 +155,17 @@ async function getTelegramActivity(date) {
 }
 
 async function getTelegramMembersCount() {
-  const text = await fetchText(tgtrackUrl("chatMembers"));
-  const rows = rowsToObjects(parseCsv(text));
-  return rows.filter((row) => row.status === "1").length;
+  const url = new URL(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/getChatMemberCount`);
+  url.searchParams.set("chat_id", publicChannel);
+  const response = await fetchWithTimeout(url.toString());
+  const payload = await response.json().catch(() => ({}));
+  const count = Number(payload?.result);
+
+  if (!response.ok || payload?.ok !== true || !Number.isInteger(count) || count < 0) {
+    throw new Error("Telegram member count is unavailable for the public channel.");
+  }
+
+  return count;
 }
 
 async function selectExistingDailyEntry(date) {
@@ -236,7 +245,7 @@ export default async function handler(req, res) {
       getTelegramActivity(date),
       getTelegramMembersCount(),
     ]);
-    const telegram = { date, total, ...activity };
+    const telegram = { date, total, ...activity, totalSource: "telegram_bot_api", channel: publicChannel };
     const saved = await upsertDailyEntry(date, telegram);
 
     return sendJson(res, 200, {
