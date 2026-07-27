@@ -118,13 +118,33 @@ function parseCsv(text) {
 }
 
 function rowsToObjects(rows) {
-  const headers = rows[0] || [];
+  const headers = (rows[0] || []).map((header) => String(header || "").replace(/^\uFEFF/, "").trim());
   return rows.slice(1).map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index] || ""])));
 }
 
+function todayAlmaty() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Almaty", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function shiftDate(value, days) {
+  const date = new Date(`${value}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return isoDate(date);
+}
+
 function dayNumToDate(dayNum) {
-  const date = new Date(Date.UTC(1970, 0, 1));
-  date.setUTCDate(date.getUTCDate() + Number(dayNum));
+  const raw = String(dayNum || "").trim();
+  if (!raw) return "";
+  const value = Number(raw.replace(",", "."));
+  if (!Number.isFinite(value)) return "";
+  const date = value >= 30_000
+    ? new Date(Date.UTC(1899, 11, 30))
+    : new Date(Date.UTC(1970, 0, 1));
+  date.setUTCDate(date.getUTCDate() + value);
   return isoDate(date);
 }
 
@@ -140,17 +160,29 @@ function tgtrackUrl(report) {
 async function getTelegramActivity(date) {
   const text = await fetchText(tgtrackUrl("join_left_by_date"));
   const rows = rowsToObjects(parseCsv(text));
+  const parsedDates = [];
   const totals = rows.reduce((acc, row) => {
-    if (dayNumToDate(row.dayNum) !== date) return acc;
+    const rowDate = dayNumToDate(row.dayNum);
+    if (rowDate) parsedDates.push(rowDate);
+    if (rowDate !== date) return acc;
+    acc.matchedRows += 1;
     acc.joined += Number(row.joinCount || 0);
     acc.left += Number(row.leftCount || 0);
     return acc;
-  }, { joined: 0, left: 0 });
+  }, { joined: 0, left: 0, matchedRows: 0 });
+  parsedDates.sort();
 
   return {
     joined: totals.joined,
     left: totals.left,
     growth: totals.joined - totals.left,
+    diagnostics: {
+      reportRows: rows.length,
+      matchedRows: totals.matchedRows,
+      firstDate: parsedDates[0] || null,
+      lastDate: parsedDates.at(-1) || null,
+      columns: Object.keys(rows[0] || {}).slice(0, 12),
+    },
   };
 }
 
@@ -195,8 +227,7 @@ async function selectExistingDailyEntry(date) {
   return rows[0] || null;
 }
 
-async function upsertDailyEntry(date, telegram) {
-  const existing = await selectExistingDailyEntry(date);
+async function upsertDailyEntry(date, telegram, existing) {
   const url = `${process.env.SUPABASE_URL}/rest/v1/daily_entries?on_conflict=date`;
   const response = await fetchWithTimeout(url, {
     method: "POST",
@@ -238,6 +269,76 @@ async function upsertDailyEntry(date, telegram) {
   return text ? JSON.parse(text) : null;
 }
 
+export function normalizeTelegramActivity(activity, existing, total, previous) {
+  const previousTotal = Number(previous?.telegram || 0);
+  const hasOfficialNet = previousTotal > 0;
+  const officialNet = hasOfficialNet ? total - previousTotal : null;
+  const hasTgTrackGross = Number(activity?.diagnostics?.matchedRows || 0) > 0;
+  const tgTrackReconciles = !hasOfficialNet || activity.growth === officialNet;
+
+  if (hasTgTrackGross && !tgTrackReconciles) {
+    // TGTrack can return a partial join/left split while its export is still
+    // catching up. The official Telegram totals are authoritative for net
+    // growth, but they cannot prove the gross joins and leaves separately.
+    return {
+      ...activity,
+      joined: 0,
+      left: 0,
+      growth: officialNet,
+      activitySource: "official_net_reconciliation",
+      diagnostics: {
+        ...activity.diagnostics,
+        tgTrackGrowth: activity.growth,
+        officialNet,
+        reconciled: false,
+      },
+    };
+  }
+
+  if (!hasTgTrackGross) {
+    const storedJoined = Number(existing?.telegram_joined || 0);
+    const storedLeft = Number(existing?.telegram_left || 0);
+    const storedGrowth = Number(existing?.telegram_growth ?? storedJoined - storedLeft);
+    const storedReconciles = !hasOfficialNet || storedGrowth === officialNet;
+    if ((storedJoined !== 0 || storedLeft !== 0) && storedReconciles) {
+      return {
+        ...activity,
+        joined: storedJoined,
+        left: storedLeft,
+        growth: storedGrowth,
+        activitySource: "stored_fallback",
+      };
+    }
+    if (hasOfficialNet) {
+      return {
+        ...activity,
+        joined: 0,
+        left: 0,
+        growth: officialNet,
+        activitySource: "official_net_fallback",
+        diagnostics: {
+          ...activity.diagnostics,
+          officialNet,
+          reconciled: false,
+        },
+      };
+    }
+  }
+
+  if (hasTgTrackGross) {
+    return {
+      ...activity,
+      activitySource: "tgtrack_reconciled",
+      diagnostics: {
+        ...activity.diagnostics,
+        officialNet,
+        reconciled: true,
+      },
+    };
+  }
+  return { ...activity, activitySource: "unavailable" };
+}
+
 export default async function handler(req, res) {
   try {
     if (req.method !== "GET" && req.method !== "POST") {
@@ -248,12 +349,23 @@ export default async function handler(req, res) {
     checkSecret(req);
 
     const date = getDate(req);
-    const [activity, members] = await Promise.all([
+    const [activity, members, existing, previous] = await Promise.all([
       getTelegramActivity(date),
       getTelegramMembersCount(),
+      selectExistingDailyEntry(date),
+      selectExistingDailyEntry(shiftDate(date, -1)),
     ]);
-    const telegram = { date, total: members.count, ...activity, totalSource: members.source, channel: publicChannel };
-    const saved = await upsertDailyEntry(date, telegram);
+    const historicalTotal = date < todayAlmaty() ? Number(existing?.telegram || 0) : 0;
+    const total = historicalTotal > 0 ? historicalTotal : members.count;
+    const normalizedActivity = normalizeTelegramActivity(activity, existing, total, previous);
+    const telegram = {
+      date,
+      total,
+      ...normalizedActivity,
+      totalSource: historicalTotal > 0 ? "stored_historical_total" : members.source,
+      channel: publicChannel,
+    };
+    const saved = await upsertDailyEntry(date, telegram, existing);
 
     return sendJson(res, 200, {
       ok: true,
