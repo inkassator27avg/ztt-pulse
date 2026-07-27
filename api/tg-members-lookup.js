@@ -220,21 +220,28 @@ async function loadMembers() {
   }
 }
 
-function tgtrackUrl(report) {
+function tgtrackUrl(report, params = {}) {
   const url = new URL(`https://report.tgtrack.ru/pro/${report}.php`);
   url.searchParams.set("ver", TGTRACK_VERSION);
   url.searchParams.set("platform", "google");
   url.searchParams.set("apiKey", process.env.TGTRACK_API_KEY);
   url.searchParams.set("refresh", "2");
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && String(value).trim()) {
+      url.searchParams.set(key, String(value).trim());
+    }
+  }
   return url.toString();
 }
 
-async function loadTgTrackMembers() {
+async function loadTgTrackMembers(userId = "") {
   if (!process.env.TGTRACK_API_KEY) throw new Error("tgtrack_api_not_configured");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
   try {
-    const response = await fetch(tgtrackUrl("chatMembers"), {
+    // chatMembers is a lookup-style report: without userID TGTrack returns a
+    // short preview rather than the full member history.
+    const response = await fetch(tgtrackUrl("chatMembers", userId ? { userID: userId } : {}), {
       signal: controller.signal,
       cache: "no-store",
       headers: { "User-Agent": "Mozilla/5.0" },
@@ -298,11 +305,19 @@ export default async function handler(req, res) {
     if (!lookups.length || lookups.length > MAX_LOOKUPS) {
       return sendJson(res, 400, { ok: false, error: "invalid_lookups" });
     }
-    const [tgtrackResult, sheetResult] = await Promise.allSettled([
-      loadTgTrackMembers(),
-      loadMembers(),
+    const targetIds = [...new Set(lookups
+      .map((lookup) => normalizeId(lookup?.telegram_user_id))
+      .filter(Boolean))];
+    const tgtrackRequests = targetIds.length
+      ? targetIds.map((userId) => loadTgTrackMembers(userId))
+      : [loadTgTrackMembers()];
+    const [tgtrackResults, [sheetResult]] = await Promise.all([
+      Promise.allSettled(tgtrackRequests),
+      Promise.allSettled([loadMembers()]),
     ]);
-    const tgtrackMembers = tgtrackResult.status === "fulfilled" ? tgtrackResult.value : [];
+    const tgtrackMembers = tgtrackResults
+      .filter((result) => result.status === "fulfilled")
+      .flatMap((result) => result.value);
     const sheetMembers = sheetResult.status === "fulfilled" ? sheetResult.value : [];
     if (!tgtrackMembers.length && !sheetMembers.length) {
       throw new Error("tgtrack_member_sources_unavailable");
@@ -323,9 +338,10 @@ export default async function handler(req, res) {
       diagnostics: {
         tgtrackRows: tgtrackMembers.length,
         tgtrackColumns: Object.keys(tgtrackMembers[0] || {}).slice(0, 20),
+        tgtrackRequestCount: tgtrackRequests.length,
         sheetRows: sheetMembers.length,
         sheetColumns: Object.keys(sheetMembers[0] || {}).slice(0, 20),
-        tgtrackOk: tgtrackResult.status === "fulfilled",
+        tgtrackOk: tgtrackResults.some((result) => result.status === "fulfilled"),
         sheetOk: sheetResult.status === "fulfilled",
       },
       results,
