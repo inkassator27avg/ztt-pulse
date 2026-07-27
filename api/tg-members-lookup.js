@@ -323,6 +323,9 @@ export default async function handler(req, res) {
       throw new Error("tgtrack_member_sources_unavailable");
     }
     const asOf = new Date();
+    const tgtrackInfos = tgtrackMembers.map(memberInfo);
+    const sheetInfos = sheetMembers.map(memberInfo);
+    const requestedIdSet = new Set(targetIds);
     const results = lookups.map((lookup) => {
       const key = String(lookup?.key || "").slice(0, 128);
       const tgtrack = findFirstJoin(tgtrackMembers, lookup || {}, "tgtrack_chat_members", asOf);
@@ -339,8 +342,16 @@ export default async function handler(req, res) {
         tgtrackRows: tgtrackMembers.length,
         tgtrackColumns: Object.keys(tgtrackMembers[0] || {}).slice(0, 20),
         tgtrackRequestCount: tgtrackRequests.length,
+        tgtrackRowsWithUserId: tgtrackInfos.filter((item) => item.userId).length,
+        tgtrackRowsWithJoinDate: tgtrackInfos.filter((item) => item.joinedAt).length,
+        tgtrackRowsWithDays: tgtrackInfos.filter((item) => Number.isInteger(item.daysInChannel)).length,
+        tgtrackRequestedIdMatches: tgtrackInfos.filter((item) => requestedIdSet.has(item.userId)).length,
         sheetRows: sheetMembers.length,
         sheetColumns: Object.keys(sheetMembers[0] || {}).slice(0, 20),
+        sheetRowsWithUserId: sheetInfos.filter((item) => item.userId).length,
+        sheetRowsWithJoinDate: sheetInfos.filter((item) => item.joinedAt).length,
+        sheetRowsWithDays: sheetInfos.filter((item) => Number.isInteger(item.daysInChannel)).length,
+        sheetRequestedIdMatches: sheetInfos.filter((item) => requestedIdSet.has(item.userId)).length,
         tgtrackOk: tgtrackResults.some((result) => result.status === "fulfilled"),
         sheetOk: sheetResult.status === "fulfilled",
       },
