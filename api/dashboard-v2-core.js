@@ -27,7 +27,7 @@ function payloadCreativeKey(payload) {
 }
 
 function saleIdentity(row, index) {
-  return String(row.telegram_user_id || row.telegram_username || `sale-${index}`);
+  return String(row.buyer_hash || row.telegram_user_id || row.telegram_username || `sale-${index}`);
 }
 
 function resolveRevenueKzt(row, rate) {
@@ -183,4 +183,3 @@ export function buildDashboardReport({
     coverage: { unmatchedSales, unmappedSpendKzt, providers, meta: metaDiagnostics },
   };
 }
-
