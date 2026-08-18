@@ -127,7 +127,7 @@ export default async function handler(req, res) {
     validateRange(from, to);
 
     const dailyPath = `daily_entries?date=gte.${from}&date=lte.${to}&select=*&order=date.asc`;
-    const salesPath = `sales_attribution?sale_date=gte.${from}&sale_date=lte.${to}&select=*&order=sale_date.asc`;
+    const salesPath = `dashboard_sales?sale_date=gte.${from}&sale_date=lte.${to}&select=*&order=sale_date.asc`;
     const [dailyResult, salesResult, metaResult] = await Promise.allSettled([
       supabaseRows(dailyPath),
       supabaseRows(salesPath),
