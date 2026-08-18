@@ -29,3 +29,22 @@ select
   round(avg(days_to_purchase)::numeric, 1) as avg_days_to_purchase,
   percentile_cont(0.5) within group (order by days_to_purchase) as median_days_to_purchase
 from sales_attribution;
+
+create or replace view dashboard_sales
+with (security_barrier = true, security_invoker = false) as
+select
+  sale_date,
+  encode(digest(coalesce(telegram_user_id, telegram_username, lookup_key, id::text), 'sha256'), 'hex') as buyer_hash,
+  tariff,
+  amount,
+  joined_at,
+  days_to_purchase,
+  member_payload
+from sales_attribution;
+
+revoke all on table dashboard_sales from public;
+grant select on table dashboard_sales to anon, service_role;
+grant select, insert, update, delete on table sales_attribution to service_role;
+grant select on table sales_attribution_summary to service_role;
+
+notify pgrst, 'reload schema';
