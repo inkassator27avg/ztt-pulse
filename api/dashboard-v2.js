@@ -97,6 +97,18 @@ function datesBetween(from, to) {
   return values;
 }
 
+function supabaseRuntimeLabel() {
+  const project = String(process.env.SUPABASE_URL || "").includes("caapzeyqgpuyiclpbcvt")
+    ? "ztt-pulse"
+    : String(process.env.SUPABASE_URL || "").includes("rkgguzxdbodraidddenl") ? "ztt-core" : "other";
+  try {
+    const payload = JSON.parse(Buffer.from(String(process.env.SUPABASE_KEY || "").split(".")[1], "base64url").toString("utf8"));
+    return { project, role: ["anon", "authenticated", "service_role"].includes(payload.role) ? payload.role : "other" };
+  } catch {
+    return { project, role: "non_jwt" };
+  }
+}
+
 export default async function handler(req, res) {
   const origin = allowedOrigin(req);
   if (origin) res.setHeader("Access-Control-Allow-Origin", origin);
@@ -123,6 +135,7 @@ export default async function handler(req, res) {
     ]);
     if (dailyResult.status === "rejected" || salesResult.status === "rejected") {
       console.warn("[dashboard-v2] supabase_sources", {
+        runtime: supabaseRuntimeLabel(),
         daily: dailyResult.status === "fulfilled" ? "ok" : String(dailyResult.reason?.message || "error"),
         sales: salesResult.status === "fulfilled" ? "ok" : String(salesResult.reason?.message || "error"),
       });
