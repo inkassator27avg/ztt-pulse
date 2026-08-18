@@ -1,5 +1,10 @@
 {
   "cleanUrls": true,
+  "functions": {
+    "api/dashboard-v2.js": {
+      "maxDuration": 60
+    }
+  },
   "crons": [
     {
       "path": "/api/refresh-stats",
