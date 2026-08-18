@@ -121,6 +121,12 @@ export default async function handler(req, res) {
       supabaseRows(salesPath),
       loadMetaRange(from, to),
     ]);
+    if (dailyResult.status === "rejected" || salesResult.status === "rejected") {
+      console.warn("[dashboard-v2] supabase_sources", {
+        daily: dailyResult.status === "fulfilled" ? "ok" : String(dailyResult.reason?.message || "error"),
+        sales: salesResult.status === "fulfilled" ? "ok" : String(salesResult.reason?.message || "error"),
+      });
+    }
     const dailyEntries = dailyResult.status === "fulfilled" ? dailyResult.value : [];
     const salesRows = salesResult.status === "fulfilled" ? salesResult.value : [];
     const lookups = salesRows.map((row, index) => ({ key: `sale:${index}`, telegram_user_id: row.telegram_user_id, attribution_date: row.sale_date }));
