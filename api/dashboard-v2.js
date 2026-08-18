@@ -114,8 +114,8 @@ export default async function handler(req, res) {
     const from = dateValue(req.query?.from, shiftDate(to, -6));
     validateRange(from, to);
 
-    const dailyPath = `daily_entries?date=gte.${from}&date=lte.${to}&select=date,ad_spend,telegram_joined,sales_29,sales_49,sales_99&order=date.asc`;
-    const salesPath = `sales_attribution?sale_date=gte.${from}&sale_date=lte.${to}&select=sale_date,telegram_user_id,telegram_username,tariff,amount,joined_at,days_to_purchase,member_payload&order=sale_date.asc,created_at.asc`;
+    const dailyPath = `daily_entries?date=gte.${from}&date=lte.${to}&select=*&order=date.asc`;
+    const salesPath = `sales_attribution?sale_date=gte.${from}&sale_date=lte.${to}&select=*&order=sale_date.asc`;
     const [dailyResult, salesResult, metaResult] = await Promise.allSettled([
       supabaseRows(dailyPath),
       supabaseRows(salesPath),
@@ -150,4 +150,3 @@ export default async function handler(req, res) {
     return sendJson(res, error.statusCode || 500, { ok: false, error: String(error.message || "dashboard_failed").split(":")[0] });
   }
 }
-
