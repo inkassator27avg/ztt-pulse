@@ -1,9 +1,9 @@
 import { creativeKeyFromAdName } from "./_creative-key.js";
 import { resolveCreativeDestination } from "./_meta-destination.js";
 
-const META_VERSION = "v20.0";
-const AD_ACCOUNT_ID = "act_1038880678191397";
-const DEFAULT_PAGE_ID = "104558388753626";
+const META_VERSION = "v25.0";
+const AD_ACCOUNT_ID = process.env.META_AD_ACCOUNT_ID || "act_1414044370812627";
+const DEFAULT_PAGE_ID = "1552807261241947";
 const DEFAULT_INSTAGRAM_ACCOUNT_ID = "17841461871497307";
 
 function normalizeId(value) {

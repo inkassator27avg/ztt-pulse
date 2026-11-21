@@ -1,6 +1,6 @@
-const metaVersion = "v20.0";
-const adAccountId = "act_1038880678191397";
-const defaultPageId = "104558388753626";
+const metaVersion = "v25.0";
+const adAccountId = process.env.META_AD_ACCOUNT_ID || "act_1414044370812627";
+const defaultPageId = "1552807261241947";
 const defaultInstagramAccountId = "17841461871497307";
 
 const requiredEnv = ["META_ACCESS_TOKEN", "SUPABASE_URL", "SUPABASE_KEY"];
